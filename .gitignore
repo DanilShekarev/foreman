@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+data/
+vault/
+auth_token.txt
+*.pyc

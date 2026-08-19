@@ -1,0 +1,6 @@
+fastapi
+uvicorn[standard]
+claude-agent-sdk
+python-multipart
+mammoth
+markdownify

@@ -1,0 +1,423 @@
+"""Агент-сессии: по одной на чат, живут в процессе сервера.
+
+Паттерн из voxels/agent_runner.py, но сессий много (словарь chat_id -> Session).
+Каждая сессия — свой ClaudeSDKClient (подпроцесс CLI). Создаётся лениво при
+первом сообщении с resume сохранённого sdk_session_id, закрывается по
+idle-таймауту (session_id остаётся в БД — следующее сообщение делает resume).
+
+Права — ТОЛЬКО PreToolUse-хуками: запись в allowed_tools авторазрешает вызов
+до can_use_tool (CanUseToolShadowedWarning), поэтому колбэк-гард молча не
+работает. Bash запрещён целиком, git-операции делает сервер.
+"""
+from __future__ import annotations
+
+import asyncio
+import json
+import time
+from pathlib import Path
+from typing import Any, AsyncIterator, Optional
+
+from claude_agent_sdk import (
+    AssistantMessage,
+    ClaudeAgentOptions,
+    ClaudeSDKClient,
+    HookMatcher,
+    ResultMessage,
+    TextBlock,
+    ToolUseBlock,
+)
+
+import gitops
+import prompts
+import store
+import vaultlib
+from common import setup_auth
+from vaultlib import VAULT
+
+import os
+
+MODEL = os.environ.get("GD_MODEL", "sonnet")
+MAX_TURNS = int(os.environ.get("GD_MAX_TURNS", "100"))
+IDLE_SECONDS = 30 * 60          # закрыть молчащий клиент (resume вернёт контекст)
+MAX_CONCURRENT_TURNS = 3        # глобальный предел одновременных ходов
+DB_THROTTLE = 1.5               # сек между апдейтами стримящегося текста в БД
+CHANNEL_CONTEXT_MESSAGES = 30
+
+WRITE_TOOLS = ("Edit", "Write", "MultiEdit")
+
+
+def _deny(message: str) -> dict:
+    return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
+                                   "permissionDecision": "deny",
+                                   "permissionDecisionReason": message}}
+
+
+def _tool_path(tool_input: dict) -> Optional[str]:
+    return tool_input.get("file_path") or tool_input.get("path") or None
+
+
+def _make_guards(scopes: dict, extra_read: set):
+    """write_guard: только write-корни сессии; read_guard: только read-корни
+    (shared + свой personal + Unity). Пути с .git режутся всегда.
+    extra_read — живой set точечных разрешений (приложенные к сообщениям файлы
+    из data/uploads); каталог uploads целиком остаётся закрыт — Glob по нему
+    показал бы файлы чужих чатов."""
+    read_roots = [p.resolve() for p in scopes["read"]]
+    write_roots = [p.resolve() for p in scopes["write"]]
+
+    def _bad_git(p: Path) -> bool:
+        return ".git" in p.parts
+
+    async def write_guard(input_data, tool_use_id, context):
+        name = input_data.get("tool_name") or ""
+        if name not in WRITE_TOOLS:
+            return {}
+        raw = _tool_path(input_data.get("tool_input") or {})
+        if not raw:
+            return _deny("не указан путь файла")
+        p = Path(raw)
+        if not p.is_absolute():
+            p = VAULT / "shared" / p
+        p = p.resolve()
+        if _bad_git(p):
+            return _deny(".git трогать нельзя")
+        if not vaultlib.path_under(p, write_roots):
+            allowed = ", ".join(str(r) for r in write_roots)
+            return _deny(f"писать можно только в: {allowed}. Код игры — только чтение.")
+        return {}
+
+    async def read_guard(input_data, tool_use_id, context):
+        name = input_data.get("tool_name") or ""
+        if name not in ("Read", "Grep", "Glob"):
+            return {}
+        raw = _tool_path(input_data.get("tool_input") or {})
+        if not raw:
+            return {}  # без пути инструмент работает от cwd (vault/shared)
+        p = Path(raw)
+        if not p.is_absolute():
+            p = VAULT / "shared" / p
+        p = p.resolve()
+        if _bad_git(p):
+            return _deny(".git читать незачем")
+        if not vaultlib.path_under(p, read_roots) and p not in extra_read:
+            return _deny("этот путь вне твоих областей: доступны волт (shared"
+                         " и твоя personal-папка), код игры (только чтение)"
+                         " и файлы, приложенные к сообщениям этого чата.")
+        return {}
+
+    return write_guard, read_guard
+
+
+class TurnJob:
+    def __init__(self, turn_id: int, agent_msg_id: int, prompt: str) -> None:
+        self.turn_id = turn_id
+        self.agent_msg_id = agent_msg_id
+        self.prompt = prompt
+        self.events: asyncio.Queue[Optional[dict]] = asyncio.Queue()
+
+    async def emit(self, kind: str, **data: Any) -> None:
+        await self.events.put({"type": kind, **data})
+
+    async def close(self) -> None:
+        await self.events.put(None)
+
+
+class AgentSession:
+    def __init__(self, chat: dict, owner_login: Optional[str],
+                 system_prompt: str) -> None:
+        self.chat_id = chat["id"]
+        self.chat_kind = chat["kind"]
+        self.owner_login = owner_login
+        self.system_prompt = system_prompt
+        self.client: Optional[ClaudeSDKClient] = None
+        self.queue: asyncio.Queue[TurnJob] = asyncio.Queue()
+        self.worker: Optional[asyncio.Task] = None
+        self.last_used = time.monotonic()
+        self.busy = False
+        # Точечные read-разрешения на приложенные файлы; set мутируется в
+        # submit(), замыкание гарда видит пополнения без переподключения.
+        self.extra_read: set[Path] = set()
+
+    def _options(self, resume: Optional[str]) -> ClaudeAgentOptions:
+        scopes = vaultlib.agent_scopes(self.chat_kind, self.owner_login)
+        write_guard, read_guard = _make_guards(scopes, self.extra_read)
+        add_dirs = [str(vaultlib.unity_root())]  # зеркало main, не рабочая копия
+        if self.chat_kind == "agent" and self.owner_login:
+            add_dirs.append(str(VAULT / "personal" / self.owner_login))
+        return ClaudeAgentOptions(
+            system_prompt=self.system_prompt,
+            model=MODEL,
+            cwd=str(VAULT / "shared"),
+            add_dirs=add_dirs,
+            allowed_tools=["Read", "Grep", "Glob", "Edit", "Write", "TodoWrite"],
+            disallowed_tools=["Bash", "Task", "WebSearch", "WebFetch",
+                              "NotebookEdit"],
+            permission_mode="acceptEdits",
+            setting_sources=[],
+            hooks={"PreToolUse": [
+                HookMatcher(matcher="Edit|Write|MultiEdit", hooks=[write_guard]),
+                HookMatcher(matcher="Read|Grep|Glob", hooks=[read_guard]),
+            ]},
+            max_turns=MAX_TURNS,
+            # Read картинок гонит base64 одной JSON-строкой; дефолтный лимит
+            # транспорта 1 МБ роняет ход на любом крупном скриншоте.
+            max_buffer_size=64 * 1024 * 1024,
+            resume=resume,
+        )
+
+    async def connect(self, resume: Optional[str]) -> None:
+        print(setup_auth())
+        self.client = ClaudeSDKClient(self._options(resume))
+        await self.client.connect()
+
+    async def disconnect(self) -> None:
+        if self.client is not None:
+            try:
+                await self.client.disconnect()
+            except Exception:
+                pass
+            self.client = None
+
+
+class SessionManager:
+    def __init__(self) -> None:
+        self.sessions: dict[int, AgentSession] = {}
+        self.turn_gate = asyncio.Semaphore(MAX_CONCURRENT_TURNS)
+        self._janitor: Optional[asyncio.Task] = None
+
+    def start(self) -> None:
+        self._janitor = asyncio.create_task(self._cleanup_loop())
+
+    async def stop(self) -> None:
+        if self._janitor:
+            self._janitor.cancel()
+        for s in list(self.sessions.values()):
+            if s.worker:
+                s.worker.cancel()
+            await s.disconnect()
+        self.sessions.clear()
+
+    # ------------------------------------------------------------- публичное
+
+    async def submit(self, chat: dict, user_msg: dict, prompt: str,
+                     extra_files: Optional[list[str]] = None) -> TurnJob:
+        """Поставить ход в очередь чата. Возвращает job — его events читает
+        NDJSON-стрим отправителя. extra_files — приложенные файлы, которые
+        гард чтения разрешит этой сессии."""
+        conn = store.connect()
+        try:
+            turn_id = store.create_turn(conn, chat["id"], user_msg["id"])
+            agent_msg = store.add_message(
+                conn, chat["id"], author_kind="agent", author_user_id=None,
+                author_name=store.AGENT_NAME, text="",
+                thread_root_id=user_msg.get("thread_root_id"),
+                status="streaming", turn_id=turn_id)
+        finally:
+            conn.close()
+        session = self._get_session(chat)
+        for f in extra_files or []:
+            session.extra_read.add(Path(f).resolve())
+        job = TurnJob(turn_id, agent_msg["id"], prompt)
+        await session.queue.put(job)
+        return job
+
+    async def drop(self, chat_id: int) -> None:
+        """Закрыть сессию чата навсегда (чат удаляется)."""
+        s = self.sessions.pop(chat_id, None)
+        if s is None:
+            return
+        if s.worker:
+            s.worker.cancel()
+        await s.disconnect()
+
+    async def interrupt(self, chat_id: int) -> bool:
+        s = self.sessions.get(chat_id)
+        if s and s.client and s.busy:
+            try:
+                await s.client.interrupt()
+                return True
+            except Exception:
+                return False
+        return False
+
+    def status(self, chat_id: int) -> dict:
+        s = self.sessions.get(chat_id)
+        return {"active": s is not None and s.client is not None,
+                "busy": bool(s and s.busy),
+                "queued": s.queue.qsize() if s else 0}
+
+    # ------------------------------------------------------------- внутренности
+
+    def _get_session(self, chat: dict) -> AgentSession:
+        s = self.sessions.get(chat["id"])
+        if s is not None:
+            return s
+        conn = store.connect()
+        try:
+            owner_login = owner_name = None
+            if chat.get("owner_user_id"):
+                owner = store.get_user(conn, chat["owner_user_id"])
+                owner_login, owner_name = owner["login"], owner["display_name"]
+            member_names = [store.get_user(conn, uid)["display_name"]
+                            for uid in store.chat_member_ids(conn, chat["id"])]
+        finally:
+            conn.close()
+        system_prompt = prompts.build_prompt(
+            chat, owner_login=owner_login, owner_name=owner_name,
+            members=member_names)
+        s = AgentSession(chat, owner_login, system_prompt)
+        s.worker = asyncio.create_task(self._worker(s))
+        self.sessions[chat["id"]] = s
+        return s
+
+    async def _cleanup_loop(self) -> None:
+        while True:
+            await asyncio.sleep(60)
+            now = time.monotonic()
+            for chat_id, s in list(self.sessions.items()):
+                if s.busy or s.queue.qsize() or now - s.last_used < IDLE_SECONDS:
+                    continue
+                if s.worker:
+                    s.worker.cancel()
+                await s.disconnect()
+                self.sessions.pop(chat_id, None)
+                print(f"[agent] сессия чата {chat_id} закрыта по бездействию")
+
+    async def _worker(self, s: AgentSession) -> None:
+        while True:
+            job = await s.queue.get()
+            s.last_used = time.monotonic()
+            async with self.turn_gate:
+                s.busy = True
+                try:
+                    await self._run_turn(s, job)
+                except Exception as err:
+                    await self._fail_turn(s, job, f"{type(err).__name__}: {err}")
+                finally:
+                    s.busy = False
+                    s.last_used = time.monotonic()
+
+    async def _run_turn(self, s: AgentSession, job: TurnJob) -> None:
+        conn = store.connect()
+        try:
+            resume = store.stored_sdk_session(conn, s.chat_id)
+        finally:
+            conn.close()
+
+        if s.client is None:
+            try:
+                await s.connect(resume)
+            except Exception:
+                if resume is None:
+                    raise
+                # Сохранённая SDK-сессия могла пропасть (чистка ~/.claude) —
+                # одна попытка без resume.
+                await s.connect(None)
+
+        text_parts: list[str] = []
+        tools: list[dict] = []
+        touched: list[Path] = []
+        sdk_session_id: Optional[str] = None
+        cost_usd: Optional[float] = None
+        last_db_push = 0.0
+
+        async def push_db(status: str = "streaming") -> None:
+            conn = store.connect()
+            try:
+                store.update_message_text(conn, job.agent_msg_id,
+                                          "\n\n".join(text_parts), status)
+            finally:
+                conn.close()
+
+        await job.emit("start", turn=job.turn_id, message_id=job.agent_msg_id)
+        try:
+            await s.client.query(job.prompt)
+            async for msg in s.client.receive_response():
+                if isinstance(msg, AssistantMessage):
+                    for block in msg.content:
+                        if isinstance(block, TextBlock) and block.text.strip():
+                            text_parts.append(block.text)
+                            await job.emit("text", text=block.text)
+                            if time.monotonic() - last_db_push > DB_THROTTLE:
+                                last_db_push = time.monotonic()
+                                await push_db()
+                        elif isinstance(block, ToolUseBlock):
+                            entry = {"name": block.name,
+                                     "input": _short_input(block.input)}
+                            tools.append(entry)
+                            await job.emit("tool", **entry)
+                            if block.name in WRITE_TOOLS:
+                                raw = _tool_path(block.input or {})
+                                if raw:
+                                    p = Path(raw)
+                                    if not p.is_absolute():
+                                        p = VAULT / "shared" / p
+                                    touched.append(p)
+                elif isinstance(msg, ResultMessage):
+                    sdk_session_id = getattr(msg, "session_id", None)
+                    cost = getattr(msg, "total_cost_usd", None)
+                    if cost:
+                        cost_usd = float(cost)
+        except Exception as err:
+            await self._fail_turn(s, job, f"{type(err).__name__}: {err}",
+                                  text="\n\n".join(text_parts),
+                                  sdk_session_id=sdk_session_id)
+            return
+
+        # git-коммит хода — только тронутые файлы
+        commit_hash = None
+        files_rel: list[str] = []
+        if touched:
+            uniq = list(dict.fromkeys(p.resolve() for p in touched))
+            for p in uniq:
+                try:
+                    files_rel.append(p.relative_to(VAULT).as_posix())
+                except ValueError:
+                    pass
+            try:
+                commit_hash = await gitops.commit_paths(
+                    uniq, f"agent({s.chat_id}): {job.prompt[:70]}", "agent")
+            except gitops.GitError as err:
+                await job.emit("error", text=f"git: {err}")
+
+        conn = store.connect()
+        try:
+            store.finish_turn(conn, job.turn_id, status="done",
+                              sdk_session_id=sdk_session_id, cost_usd=cost_usd,
+                              files=files_rel, tools=tools,
+                              commit_hash=commit_hash)
+        finally:
+            conn.close()
+        await push_db(status="final")
+        await job.emit("turn", turn=job.turn_id, files=files_rel,
+                       commit=commit_hash, cost_usd=cost_usd)
+        await job.emit("done")
+        await job.close()
+
+    async def _fail_turn(self, s: AgentSession, job: TurnJob, error: str,
+                         text: str = "", sdk_session_id: Optional[str] = None) -> None:
+        conn = store.connect()
+        try:
+            store.finish_turn(conn, job.turn_id, status="error", error=error,
+                              sdk_session_id=sdk_session_id)
+            store.update_message_text(
+                conn, job.agent_msg_id,
+                (text + f"\n\n⚠️ Ошибка агента: {error}").strip(), "error")
+        finally:
+            conn.close()
+        await job.emit("error", text=error)
+        await job.emit("done")
+        await job.close()
+        # Клиент после ошибки надёжнее пересоздать (resume восстановит контекст).
+        await s.disconnect()
+
+
+def _short_input(data: Any, limit: int = 300) -> str:
+    try:
+        text = json.dumps(data, ensure_ascii=False)
+    except Exception:
+        text = str(data)
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+manager = SessionManager()

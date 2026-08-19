@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>GD-ассистент</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🎮</text></svg>">
+<script>document.documentElement.dataset.theme = localStorage.getItem("gd_theme") || "dark";</script>
+<link rel="stylesheet" href="vendor/codemirror.min.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div id="brand"><span class="logo">🎮</span> GD-ассистент</div>
+    <div class="side-head">
+      <span id="me-name"></span>
+      <span>
+        <button id="btn-search" title="Поиск (Ctrl+K)">🔍</button>
+        <button id="btn-notify" style="display:none" title="Уведомления">🔕</button>
+        <button id="btn-theme" title="Сменить тему">🌓</button>
+        <button id="btn-admin" style="display:none" title="Пользователи">⚙</button>
+        <a href="logout" title="Выйти">⏻</a>
+      </span>
+    </div>
+    <div class="side-section">
+      <div class="side-title">Агент <button id="btn-new-agent" title="Новая сессия">＋</button></div>
+      <div id="list-agent" class="chat-list"></div>
+    </div>
+    <div class="side-section">
+      <div class="side-title">Каналы <button id="btn-new-channel" title="Новый канал">＋</button></div>
+      <div id="list-channels" class="chat-list"></div>
+    </div>
+    <div class="side-section">
+      <div class="side-title">Личные <button id="btn-new-dm" title="Написать">＋</button></div>
+      <div id="list-dms" class="chat-list"></div>
+    </div>
+    <div class="side-section">
+      <div class="side-title">Люди</div>
+      <div id="list-users" class="chat-list"></div>
+    </div>
+  </aside>
+
+  <main id="chat-pane">
+    <div id="chat-header">
+      <span id="chat-title">Выберите чат</span>
+      <span id="agent-state"></span>
+      <button id="btn-stop" style="display:none">■ остановить</button>
+      <button id="btn-del-chat" style="display:none" title="Удалить сессию">🗑</button>
+      <button id="btn-pins" style="display:none" title="Закреплённые сообщения">📌<span id="pin-count"></span></button>
+      <button id="btn-files" style="display:none" title="Файлы чата">📁</button>
+      <button id="btn-vault-toggle" title="Волт">📚</button>
+    </div>
+    <div id="messages"></div>
+    <div id="typing-line"></div>
+    <div id="composer">
+      <div id="mention-pop" style="display:none"></div>
+      <div id="attach-chips"></div>
+      <div id="composer-box">
+        <button id="btn-attach" title="Прикрепить файл с компьютера">📎</button>
+        <button id="btn-attach-doc" title="Прикрепить документ из волта">🔗</button>
+        <input id="file-input" type="file" multiple hidden>
+        <textarea id="input" rows="1" placeholder="Сообщение…  @агент — позвать агента"></textarea>
+        <button id="btn-send" title="Отправить (Enter)">➤</button>
+      </div>
+    </div>
+  </main>
+
+  <aside id="thread-pane" style="display:none">
+    <div id="thread-header">
+      <span>🧵 Тред</span>
+      <button id="btn-thread-close">✕</button>
+    </div>
+    <div id="thread-messages"></div>
+    <div id="thread-attach-chips"></div>
+    <div id="thread-composer">
+      <div id="thread-mention-pop" style="display:none"></div>
+      <button id="btn-thread-attach" title="Прикрепить файл">📎</button>
+      <button id="btn-thread-attach-doc" title="Прикрепить документ из волта">🔗</button>
+      <input id="thread-file-input" type="file" multiple hidden>
+      <textarea id="thread-input" rows="2" placeholder="Ответить в треде…"></textarea>
+      <button id="btn-thread-send" title="Отправить">➤</button>
+    </div>
+  </aside>
+
+  <aside id="vault-pane">
+    <div id="vault-resizer" title="Потяните, чтобы изменить ширину"></div>
+    <div id="vault-header">
+      <span>📚 Волт</span>
+      <label class="upload-btn" title="Загрузить .md или .docx">⬆<input id="upload-input" type="file" accept=".md,.docx,.txt" hidden></label>
+      <button id="btn-vault-back" style="display:none">← дерево</button>
+    </div>
+    <div id="vault-tree"></div>
+    <div id="vault-doc" style="display:none">
+      <div id="vault-doc-head">
+        <span id="vault-doc-path"></span>
+        <button id="btn-doc-history" title="История правок">🕒</button>
+        <button id="btn-doc-export" title="Скачать как docx">⬇</button>
+        <button id="btn-doc-edit" title="Редактировать">✎</button>
+        <button id="btn-doc-save" style="display:none" title="Сохранить (Ctrl+S)">💾</button>
+      </div>
+      <div id="vault-doc-view" class="md"></div>
+      <textarea id="vault-doc-edit" style="display:none" spellcheck="false"></textarea>
+    </div>
+  </aside>
+</div>
+
+<div id="modal-back" style="display:none">
+  <div id="modal"></div>
+</div>
+
+<script src="vendor/codemirror.min.js"></script>
+<script src="vendor/cm-xml.min.js"></script>
+<script src="vendor/cm-markdown.min.js"></script>
+<script src="vendor/cm-continuelist.min.js"></script>
+<script src="md.js"></script>
+<script src="diff.js"></script>
+<script src="vault.js"></script>
+<script src="chat.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
