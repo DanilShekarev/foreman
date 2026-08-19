@@ -402,8 +402,13 @@ def delete_agent_chat(conn: sqlite3.Connection, chat_id: int,
                      " (SELECT id FROM messages WHERE chat_id = ?)", (chat_id,))
         conn.execute("DELETE FROM mentions WHERE message_id IN"
                      " (SELECT id FROM messages WHERE chat_id = ?)", (chat_id,))
-        conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
+        # Порядок важен (foreign_keys=ON): agent_turns.user_message_id и
+        # thread_root_id ссылаются на messages — сначала ходы, потом ответы
+        # тредов, и только затем корни.
         conn.execute("DELETE FROM agent_turns WHERE chat_id = ?", (chat_id,))
+        conn.execute("DELETE FROM messages WHERE chat_id = ?"
+                     " AND thread_root_id IS NOT NULL", (chat_id,))
+        conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM agent_sessions WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM chat_reads WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM chat_members WHERE chat_id = ?", (chat_id,))
