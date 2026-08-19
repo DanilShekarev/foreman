@@ -153,6 +153,9 @@ const CHAT = (() => {
     const avatar = m.author_kind === "agent"
       ? `<div class="avatar">🤖</div>`
       : `<div class="avatar" style="background:${avatarColor(m.author_name)}">${MD.esc(initials(m.author_name))}</div>`;
+    const own = m.author_kind === "user" && window.ME &&
+                m.author_user_id === window.ME.id;
+    if (own) div.classList.add("mine");
     if (m.deleted_at){
       div.classList.add("deleted");
       div.innerHTML = `${avatar}<div class="msg-main">
@@ -161,8 +164,6 @@ const CHAT = (() => {
         <div class="body deleted-body">сообщение удалено</div></div>`;
       return div;
     }
-    const own = m.author_kind === "user" && window.ME &&
-                m.author_user_id === window.ME.id;
     // В своей сессии с агентом можно удалять и его ответы.
     const canDel = own || (current && current.kind === "agent" &&
                            m.author_kind === "agent");
@@ -173,12 +174,14 @@ const CHAT = (() => {
       <div class="head">
         <span class="author">${MD.esc(m.author_name)}</span>
         <span>${when}</span>${edited}
-        <span class="msg-actions">${EMOJI.slice(0, 3).map(e =>
-          `<button data-react="${e}">${e}</button>`).join("")}${
+        <span class="msg-actions"><span class="act-group act-reacts" title="Реакция">${
+          EMOJI.slice(0, 3).map(e =>
+            `<button data-react="${e}">${e}</button>`).join("")}</span><span
+          class="act-group act-tools">${
           canThread ? '<button class="b-thread" title="Ответить в треде">💬</button>' : ""}<button
           class="b-pin" title="${m.pinned_at ? "Открепить" : "Закрепить"}">📌</button>${
           own ? '<button class="b-edit" title="Редактировать">✎</button>' : ""}${
-          canDel ? '<button class="b-del" title="Удалить">🗑</button>' : ""}</span>
+          canDel ? '<button class="b-del" title="Удалить">🗑</button>' : ""}</span></span>
       </div>
       <div class="body md"></div>
     </div>`;
@@ -544,7 +547,7 @@ const CHAT = (() => {
     autosize();
     hideMentions();
     const atts = attachments.slice();
-    attachments = [];
+    attachments.length = 0;  // очистка на месте: paste/drop держат ссылку
     renderAttachChips();
     await sendMessage(text, {container: messagesEl, atts});
   }
@@ -704,7 +707,7 @@ const CHAT = (() => {
     if (!text || !threadRoot) return;
     threadInputEl.value = "";
     const atts = threadAttachments.slice();
-    threadAttachments = [];
+    threadAttachments.length = 0;  // см. attachments: ссылку держат замыкания
     renderChips(threadAttachChips, threadAttachments);
     await sendMessage(text, {threadRootId: threadRoot.id,
                              container: threadMessagesEl, atts});

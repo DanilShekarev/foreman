@@ -41,7 +41,9 @@ MAX_TURNS = int(os.environ.get("GD_MAX_TURNS", "100"))
 IDLE_SECONDS = 30 * 60          # закрыть молчащий клиент (resume вернёт контекст)
 MAX_CONCURRENT_TURNS = 3        # глобальный предел одновременных ходов
 DB_THROTTLE = 1.5               # сек между апдейтами стримящегося текста в БД
-CHANNEL_CONTEXT_MESSAGES = 30
+# Верхний предел ВЫБОРКИ из БД; реальный объём режет prompts.trim_context
+# по бюджету символов (GD_CONTEXT_CHARS).
+CHANNEL_CONTEXT_MESSAGES = 100
 
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit")
 

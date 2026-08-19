@@ -1,7 +1,28 @@
 """Сборка system prompt агента по типу чата."""
 from __future__ import annotations
 
+import os
+
 from vaultlib import VAULT, unity_root
+
+# Контекст канала для @агент режется по объёму текста, а не по числу
+# сообщений: короткие реплики влезают десятками, простыни — по паре штук.
+CONTEXT_CHAR_BUDGET = int(os.environ.get("GD_CONTEXT_CHARS", "16000"))
+
+
+def trim_context(messages: list[dict],
+                 budget: int = CONTEXT_CHAR_BUDGET) -> list[dict]:
+    """Свежие сообщения важнее: набираем с конца, пока влезает в бюджет.
+    Хотя бы одно сообщение остаётся всегда."""
+    out: list[dict] = []
+    total = 0
+    for m in reversed(messages):
+        size = len(m.get("text") or "")
+        if out and total + size > budget:
+            break
+        out.append(m)
+        total += size
+    return list(reversed(out))
 
 
 def _base() -> str:

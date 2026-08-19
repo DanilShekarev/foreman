@@ -816,6 +816,19 @@ def add_upload(conn: sqlite3.Connection, user: dict, orig_name: str,
         return cur.lastrowid
 
 
+def rebind_uploads(conn: sqlite3.Connection, upload_ids: list[int],
+                   chat_id: int, user: dict) -> None:
+    """Файл могли прикрепить в одном чате, а отправить в другом — доступ
+    к нему проверяется по uploads.chat_id, поэтому при отправке сообщения
+    перепривязываем свои загрузки к чату сообщения."""
+    if not upload_ids:
+        return
+    with write_tx(conn):
+        for uid in upload_ids:
+            conn.execute("UPDATE uploads SET chat_id = ? WHERE id = ?"
+                         " AND user_id = ?", (chat_id, uid, user["id"]))
+
+
 def get_upload(conn: sqlite3.Connection, upload_id: int) -> dict:
     row = conn.execute("SELECT * FROM uploads WHERE id = ?", (upload_id,)).fetchone()
     if row is None:

@@ -14,6 +14,7 @@ import re
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Optional
 
 import common  # noqa: F401  (utf-8 консоль, QuickEdit) — импорт с побочным эффектом
 import uvicorn
@@ -565,6 +566,49 @@ def _line(obj: dict) -> bytes:
     return (json.dumps(obj, ensure_ascii=False) + "\n").encode("utf-8")
 
 
+def _ensure_docx_md(p: Path) -> Optional[Path]:
+    """Read агента не умеет docx — рядом с загруженным .docx держим
+    извлечённый markdown (<имя>.docx.md). Конвертируем лениво, один раз."""
+    md = p.parent / (p.name + ".md")
+    if md.is_file():
+        return md
+    if not docx_io.AVAILABLE:
+        return None
+    try:
+        text = docx_io.docx_to_markdown(
+            p.read_bytes(), p.parent / (p.name + ".assets"), p.name + ".assets")
+        md.write_text(text, encoding="utf-8")
+        return md
+    except Exception:
+        return None
+
+
+def _attachment_paths(conn, att: dict) -> list[tuple[Path, str]]:
+    """[(абс. путь для Read агента, подпись)] одного вложения сообщения.
+    Фронт шлёт доки волта с ключом path, старые записи — vault_path."""
+    out: list[tuple[Path, str]] = []
+    try:
+        rel = att.get("vault_path") or att.get("path")
+        if rel:
+            p = (vaultlib.VAULT / rel).resolve()
+            if p.is_file():
+                out.append((p, att.get("title") or p.name))
+        elif att.get("upload_id"):
+            up = store.get_upload(conn, int(att["upload_id"]))
+            p = (HERE / "data" / up["vault_path"]).resolve()
+            if p.is_file():
+                title = att.get("title") or up["orig_name"]
+                if p.suffix.lower() == ".docx":
+                    md = _ensure_docx_md(p)
+                    if md:
+                        out.append((md, f"{title} (текст из docx)"))
+                        return out
+                out.append((p, title))
+    except (store.StoreError, ValueError, OSError):
+        pass
+    return out
+
+
 @app.post("/api/chats/{chat_id}/send")
 async def api_send(chat_id: int, request: Request):
     body = await request.json()
@@ -588,6 +632,17 @@ async def api_send(chat_id: int, request: Request):
         if (chat["kind"] == "agent" and chat["title"] == store.DEFAULT_AGENT_TITLE
                 and store.message_count(conn, chat_id) == 1):
             store.rename_chat(conn, chat_id, store.auto_title(text))
+        # Свои загрузки перепривязываются к чату отправки — иначе файл,
+        # выбранный в одном чате и отправленный в другом, не открывался бы
+        # у остальных участников («этот чат вам не виден»).
+        upload_ids = []
+        for a in body.get("attachments") or []:
+            try:
+                if a.get("upload_id"):
+                    upload_ids.append(int(a["upload_id"]))
+            except (TypeError, ValueError):
+                pass
+        store.rebind_uploads(conn, upload_ids, chat_id, user)
         call_agent = chat["kind"] == "agent" or store.mentions_agent(text)
         prompt = text
         # Приложенные файлы: агенту — абсолютные пути, гарду — разрешение читать.
@@ -596,22 +651,17 @@ async def api_send(chat_id: int, request: Request):
         if call_agent:
             lines = []
             for att in body.get("attachments") or []:
-                try:
-                    if att.get("vault_path"):
-                        p = (vaultlib.VAULT / att["vault_path"]).resolve()
-                    elif att.get("upload_id"):
-                        up = store.get_upload(conn, int(att["upload_id"]))
-                        p = (HERE / "data" / up["vault_path"]).resolve()
-                    else:
-                        continue
-                except (store.StoreError, ValueError):
-                    continue
-                if p.is_file():
+                for p, title in _attachment_paths(conn, att):
                     attach_files.append(str(p))
-                    lines.append(f"- {p} — «{att.get('title') or p.name}»")
+                    lines.append(f"- {p} — «{title}»")
             attach_note = ("\n\n[К сообщению приложены файлы — открой инструментом"
                            " Read те, что нужны для ответа (картинки Read тоже"
                            " показывает):\n" + "\n".join(lines) + "]") if lines else ""
+            # Агенту доступны и все прежние вложения этого чата, не только
+            # из сообщений с @агент.
+            for f in store.list_chat_files(conn, chat_id, limit=200):
+                for p, _t in _attachment_paths(conn, f):
+                    attach_files.append(str(p))
         if call_agent and chat["kind"] != "agent":
             # Контекст разговора: для треда — корень и ветка, иначе лента чата.
             thread_root = body.get("thread_root_id")
@@ -625,6 +675,18 @@ async def api_send(chat_id: int, request: Request):
                 recent = store.list_messages(conn, chat_id,
                                              before=user_msg["id"],
                                              limit=prompts_context_limit())
+            if thread_root:
+                # Корень треда — всегда в контексте, бюджет режет ветку.
+                recent = recent[:1] + prompts.trim_context(recent[1:])
+            else:
+                recent = prompts.trim_context(recent)
+            # Пометки вложений в контексте: агент знает, что и где лежит.
+            for m in recent:
+                notes = [f"{title}: {p}" for att in m.get("attachments") or []
+                         for p, title in _attachment_paths(conn, att)]
+                if notes:
+                    m["text"] = ((m["text"] or "") +
+                                 "\n[вложения: " + "; ".join(notes) + "]").strip()
             prompt = (prompts.channel_context(recent) +
                       f"{user['display_name']}: {text}")
         prompt += attach_note
@@ -808,6 +870,9 @@ async def api_chat_upload(chat_id: int, request: Request, file: UploadFile):
     fname = f"{secrets.token_hex(6)}_{safe}"
     UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
     (UPLOADS_DIR / fname).write_bytes(data)
+    # docx агент читать не умеет — извлекаем текст сразу при загрузке.
+    if fname.lower().endswith(".docx"):
+        _ensure_docx_md(UPLOADS_DIR / fname)
     conn = store.connect()
     try:
         upload_id = store.add_upload(conn, user, orig, f"uploads/{fname}", chat_id)
