@@ -1,4 +1,4 @@
-﻿-- Схема gd-assist. Правила те же, что в kanban: версия в meta, любая запись —
+-- Схема gd-assist. Правила те же, что в kanban: версия в meta, любая запись —
 -- внутри store.write_tx() (BEGIN IMMEDIATE). Без STRICT: SQLite питона 3.10
 -- (3.34) его ещё не знает.
 
@@ -60,7 +60,8 @@ CREATE TABLE IF NOT EXISTS messages (
     edited_at       TEXT,   -- правка автором (updated_at дёргает и стрим агента)
     deleted_at      TEXT,   -- мягкое удаление: текст стирается, каркас остаётся
     pinned_at       TEXT,   -- закреп: любой участник чата может пинить/распинить
-    pinned_by       INTEGER
+    pinned_by       INTEGER,
+    reply_to_id     INTEGER  -- ответ в ленте (как в ТГ), не тред
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
 
@@ -82,6 +83,7 @@ CREATE TABLE IF NOT EXISTS chat_reads (
     chat_id              INTEGER NOT NULL REFERENCES chats(id),
     user_id              INTEGER NOT NULL REFERENCES users(id),
     last_read_message_id INTEGER NOT NULL DEFAULT 0,
+    read_at              TEXT,  -- когда дочитал (для «кто прочитал и во сколько»)
     PRIMARY KEY (chat_id, user_id)
 );
 

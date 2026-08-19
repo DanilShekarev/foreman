@@ -20,6 +20,8 @@ const CHAT = (() => {
   let attachments = [];        // вложения к следующему сообщению ленты
   let threadAttachments = [];  // …и треда
   let threadRoot = null;       // открытый тред: корневое сообщение
+  let chatReads = [];          // кто до какого сообщения дочитал (галочки)
+  let replyTo = null;          // ответ на сообщение (как в ТГ)
 
   // ------------------------------------------------------------- открытие
 
@@ -36,6 +38,8 @@ const CHAT = (() => {
     inputEl.value = localStorage.getItem("gd_draft_" + chat.id) || "";
     autosize();
     showTyping([]);
+    clearReply();
+    chatReads = [];
     await refetch(true);
   }
 
@@ -75,9 +79,11 @@ const CHAT = (() => {
     const r = await fetch(`api/chats/${current.id}/messages`);
     if (!r.ok) { messagesEl.innerHTML = "<div class='msg system'>нет доступа</div>"; return; }
     const data = await r.json();
+    chatReads = data.reads || [];
     const stick = scroll || nearBottom(messagesEl);
     messagesEl.innerHTML = "";
     appendWithDaySep(messagesEl, data.messages, {});
+    applyTicks();
     updateAgentState(data.agent);
     lastList = data.messages;
     updatePinBtn(data.pin_count || 0);
@@ -167,17 +173,22 @@ const CHAT = (() => {
     // В своей сессии с агентом можно удалять и его ответы.
     const canDel = own || (current && current.kind === "agent" &&
                            m.author_kind === "agent");
+    const canReply = !inThread;
     const edited = m.edited_at
       ? `<span class="edited" title="изменено ${fmtFull(m.edited_at)}">(изм. ${fmtWhen(m.edited_at)})</span>`
       : "";
+    // Галочки прочитанности — у своих сообщений в чатах с людьми.
+    const ticks = own && current && current.kind !== "agent"
+      ? `<span class="ticks" data-mid="${m.id}">✓</span>` : "";
     div.innerHTML = `${avatar}<div class="msg-main">
       <div class="head">
         <span class="author">${MD.esc(m.author_name)}</span>
-        <span>${when}</span>${edited}
+        <span>${when}</span>${ticks}${edited}
         <span class="msg-actions"><span class="act-group act-reacts" title="Реакция">${
           EMOJI.slice(0, 3).map(e =>
             `<button data-react="${e}">${e}</button>`).join("")}</span><span
           class="act-group act-tools">${
+          canReply ? '<button class="b-reply" title="Ответить">↩</button>' : ""}${
           canThread ? '<button class="b-thread" title="Ответить в треде">💬</button>' : ""}<button
           class="b-pin" title="${m.pinned_at ? "Открепить" : "Закрепить"}">📌</button>${
           own ? '<button class="b-edit" title="Редактировать">✎</button>' : ""}${
@@ -187,6 +198,14 @@ const CHAT = (() => {
     </div>`;
     const main = div.querySelector(".msg-main");
     const body = div.querySelector(".body");
+    if (m.reply_to){
+      const q = document.createElement("div");
+      q.className = "reply-quote";
+      q.innerHTML = `<b>${MD.esc(m.reply_to.author_name)}</b><span>${
+        m.reply_to.deleted ? "сообщение удалено" : MD.esc(m.reply_to.text)}</span>`;
+      q.onclick = () => jumpToMessage(m.reply_to.id);
+      main.insertBefore(q, body);
+    }
     body.innerHTML = MD.render(m.text || "");
     VAULT.bindWikilinks(body);
     if (m.status === "streaming") body.classList.add("streaming-dot");
@@ -222,6 +241,8 @@ const CHAT = (() => {
     }
     div.querySelectorAll("[data-react]").forEach(b =>
       b.onclick = () => react(m.id, b.dataset.react));
+    const br = div.querySelector(".b-reply");
+    if (br) br.onclick = () => setReply(m);
     const bt = div.querySelector(".b-thread");
     if (bt) bt.onclick = () => openThread(m);
     const be = div.querySelector(".b-edit");
@@ -236,6 +257,13 @@ const CHAT = (() => {
       refetch();
     };
     if (m.pinned_at) div.classList.add("pinned");
+    div.addEventListener("contextmenu", e => {
+      // Выделенный текст и ссылки/картинки — нативному меню браузера.
+      if (getSelection().toString() || e.target.closest("a, img")) return;
+      e.preventDefault();
+      openCtxMenu(e.clientX, e.clientY, m,
+                  {inThread, own, canDel, canThread, canReply});
+    });
     return div;
   }
 
@@ -251,6 +279,159 @@ const CHAT = (() => {
     const d = new Date(iso);
     return d.toLocaleDateString("ru-RU") + " " +
            d.toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"});
+  }
+
+  // -------------------------------------------------- прочитанность (галочки)
+
+  // Кто (кроме меня) дочитал до сообщения id.
+  function readBy(mid){
+    const myId = window.ME && window.ME.id;
+    return chatReads.filter(r => r.user_id !== myId &&
+                                 r.last_read_message_id >= mid);
+  }
+
+  function applyTicks(){
+    document.querySelectorAll(".ticks").forEach(el => {
+      const read = readBy(+el.dataset.mid).length > 0;
+      el.textContent = read ? "✓✓" : "✓";
+      el.classList.toggle("read", read);
+    });
+  }
+
+  // Поллинг присылает свежие prочтения — галочки обновляются без refetch.
+  function updateReads(reads){
+    if (!current || current.kind === "agent") return;
+    const next = JSON.stringify(reads || []);
+    if (next === JSON.stringify(chatReads)) return;
+    chatReads = reads || [];
+    applyTicks();
+  }
+
+  function whoReadModal(m){
+    const readers = readBy(m.id);
+    openChatModal(`<h3>✓ Кто прочитал</h3>
+      <div class="read-list">${readers.length ? readers.map(r =>
+        `<div class="read-item"><b>${MD.esc(r.name)}</b>
+           <span>${r.read_at ? fmtFull(r.read_at) : ""}</span></div>`).join("")
+        : "<i>пока никто не прочитал</i>"}</div>
+      <div class="row"><button id="m-close">Закрыть</button></div>`);
+    document.getElementById("m-close").onclick = closeChatModal;
+  }
+
+  // ------------------------------------------------------ ответ (как в ТГ)
+
+  const replyBar = document.getElementById("reply-bar");
+
+  function setReply(m){
+    replyTo = m;
+    const text = (m.text || "").replace(/\s+/g, " ").slice(0, 120);
+    document.getElementById("reply-bar-text").innerHTML =
+      `<b>${MD.esc(m.author_name)}</b> ${MD.esc(text)}`;
+    replyBar.style.display = "flex";
+    inputEl.focus();
+  }
+
+  function clearReply(){
+    replyTo = null;
+    replyBar.style.display = "none";
+  }
+  document.getElementById("reply-bar-x").onclick = clearReply;
+
+  function jumpToMessage(id){
+    const div = messagesEl.querySelector(`.msg[data-id="${id}"]`);
+    if (!div) return;
+    div.scrollIntoView({block: "center"});
+    div.classList.add("flash");
+    setTimeout(() => div.classList.remove("flash"), 1600);
+  }
+
+  // ------------------------------------------------------ контекстное меню
+
+  function ensureCtxMenu(){
+    let menu = document.getElementById("ctx-menu");
+    if (menu) return menu;
+    menu = document.createElement("div");
+    menu.id = "ctx-menu";
+    menu.style.display = "none";
+    document.body.appendChild(menu);
+    const close = () => { menu.style.display = "none"; };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", e => {
+      if (e.key === "Escape") close();
+    });
+    messagesEl.addEventListener("scroll", close);
+    threadMessagesEl.addEventListener("scroll", close);
+    window.addEventListener("resize", close);
+    return menu;
+  }
+
+  function copyText(text){
+    if (navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+
+  function openCtxMenu(x, y, m, {inThread, own, canDel, canThread, canReply}){
+    const menu = ensureCtxMenu();
+    const items = [];
+    if (canReply)
+      items.push({icon: "↩", label: "Ответить", act: () => setReply(m)});
+    if (canThread)
+      items.push({icon: "💬", label: "Ответить в треде", act: () => openThread(m)});
+    items.push({icon: "📋", label: "Копировать текст",
+                act: () => copyText(m.text || "")});
+    items.push({icon: "📌", label: m.pinned_at ? "Открепить" : "Закрепить",
+                act: async () => {
+                  const r = await fetch(`api/messages/${m.id}/pin`, {method: "POST"});
+                  const data = await r.json().catch(() => ({}));
+                  if (data.error) alert(data.error);
+                  refetch();
+                }});
+    if (own && current && current.kind !== "agent")
+      items.push({icon: "✓", label: "Кто прочитал", act: () => whoReadModal(m)});
+    if (m.reply_to_id && !inThread)
+      items.push({icon: "🧵", label: "Цепочку — в тред", act: async () => {
+        const r = await fetch(`api/messages/${m.id}/to-thread`, {method: "POST"});
+        const data = await r.json().catch(() => ({}));
+        if (data.error){ alert(data.error); return; }
+        refetch();
+        if (data.root) openThread(data.root);
+      }});
+    if (own){
+      items.push({icon: "✎", label: "Редактировать", act: () => {
+        const div = (inThread ? threadMessagesEl : messagesEl)
+          .querySelector(`.msg[data-id="${m.id}"]`);
+        if (div) startEdit(div, m);
+      }});
+    }
+    if (canDel)
+      items.push({icon: "🗑", label: "Удалить", danger: true,
+                  act: () => deleteMessage(m)});
+    menu.innerHTML = `
+      <div class="ctx-emoji">${EMOJI.map(e =>
+        `<button data-e="${e}">${e}</button>`).join("")}</div>
+      ${items.map((it, i) => `<div class="ctx-item${it.danger ? " danger" : ""}"
+        data-i="${i}"><span class="ci-icon">${it.icon}</span>${it.label}</div>`).join("")}`;
+    menu.querySelectorAll("[data-e]").forEach(b =>
+      b.onclick = () => { react(m.id, b.dataset.e); menu.style.display = "none"; });
+    menu.querySelectorAll(".ctx-item").forEach(el =>
+      el.onclick = () => { menu.style.display = "none"; items[+el.dataset.i].act(); });
+    // Показать скрыто, замерить, вписать в окно.
+    menu.style.visibility = "hidden";
+    menu.style.display = "block";
+    const w = menu.offsetWidth, h = menu.offsetHeight;
+    menu.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
+    menu.style.visibility = "";
   }
 
   // ------------------------------------------------- правка/удаление своих
@@ -464,14 +645,16 @@ const CHAT = (() => {
 
   // Общий путь для ленты и треда: шлёт сообщение, читает NDJSON-стрим,
   // рисует ход агента в container.
-  async function sendMessage(text, {threadRootId = null, container, atts = []} = {}){
+  async function sendMessage(text, {threadRootId = null, container, atts = [],
+                                    replyToId = null} = {}){
     if (!text || !current) return;
     streaming = true;
     let agentDiv = null, agentMain = null, agentBody = null, agentText = "";
     try {
       const resp = await fetch(`api/chats/${current.id}/send`, {
         method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({text, thread_root_id: threadRootId, attachments: atts}),
+        body: JSON.stringify({text, thread_root_id: threadRootId,
+                              attachments: atts, reply_to_id: replyToId}),
       });
       if (!resp.ok){
         const err = await resp.json().catch(() => ({}));
@@ -549,7 +732,9 @@ const CHAT = (() => {
     const atts = attachments.slice();
     attachments.length = 0;  // очистка на месте: paste/drop держат ссылку
     renderAttachChips();
-    await sendMessage(text, {container: messagesEl, atts});
+    const replyToId = replyTo && replyTo.id;
+    clearReply();
+    await sendMessage(text, {container: messagesEl, atts, replyToId});
   }
 
   function shortToolInput(input){
@@ -699,6 +884,7 @@ const CHAT = (() => {
     rootDiv.querySelector(".reply-link")?.remove();
     threadMessagesEl.appendChild(rootDiv);
     appendWithDaySep(threadMessagesEl, data.messages, {inThread: true});
+    applyTicks();
     if (stick) threadMessagesEl.scrollTop = threadMessagesEl.scrollHeight;
   }
 
@@ -796,7 +982,9 @@ const CHAT = (() => {
 
   inputEl.addEventListener("keydown", e => {
     if (mainMentions.active()) return;  // Enter достаётся списку упоминаний
-    if (e.key === "Enter" && !e.shiftKey){
+    if (e.key === "Escape" && replyTo){
+      clearReply();
+    } else if (e.key === "Enter" && !e.shiftKey){
       e.preventDefault();
       send();
     } else if (e.key === "ArrowUp" && !inputEl.value){
@@ -947,6 +1135,6 @@ const CHAT = (() => {
     }
   }
 
-  return { open, onChanges, showTyping,
+  return { open, onChanges, showTyping, updateReads,
            currentId: () => current && current.id };
 })();

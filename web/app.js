@@ -87,6 +87,7 @@ const APP = (() => {
       window.ONLINE = new Set(data.online_ids || []);
       renderUsers();
       CHAT.showTyping(data.typing || []);
+      CHAT.updateReads(data.reads || []);
       if (data.events.length){
         refreshChats();
         CHAT.onChanges(data.events);

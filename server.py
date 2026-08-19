@@ -460,7 +460,8 @@ async def api_messages(chat_id: int, request: Request, before: int | None = None
         members = store.chat_member_ids(conn, chat_id)
         return {"chat": chat, "messages": msgs, "member_ids": members,
                 "agent": manager.status(chat_id),
-                "pin_count": store.pin_count(conn, chat_id)}
+                "pin_count": store.pin_count(conn, chat_id),
+                "reads": store.chat_reads_info(conn, chat_id)}
     except store.StoreError as exc:
         return _err(exc)
     finally:
@@ -527,6 +528,21 @@ async def api_chat_files(chat_id: int, request: Request):
     try:
         store.require_chat(conn, chat_id, me(request))
         return {"files": store.list_chat_files(conn, chat_id)}
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.post("/api/messages/{msg_id}/to-thread")
+async def api_to_thread(msg_id: int, request: Request):
+    """Перевести цепочку ответов в тред (корень остаётся в ленте)."""
+    conn = store.connect()
+    try:
+        msg = store.get_message(conn, msg_id)
+        store.require_chat(conn, msg["chat_id"], me(request))
+        root = store.replies_to_thread(conn, msg_id)
+        return {"root": root}
     except store.StoreError as exc:
         return _err(exc)
     finally:
@@ -623,11 +639,22 @@ async def api_send(chat_id: int, request: Request):
         if chat["kind"] == "channel" and not chat["is_private"]:
             if user["id"] not in store.chat_member_ids(conn, chat_id):
                 store.join_channel(conn, chat_id, user)
+        # Ответ на сообщение (как в ТГ): валиден только внутри этого же чата.
+        reply_msg = None
+        try:
+            rid = int(body.get("reply_to_id") or 0)
+            if rid:
+                cand = store.get_message(conn, rid)
+                if cand["chat_id"] == chat_id and not cand.get("deleted_at"):
+                    reply_msg = cand
+        except (store.StoreError, TypeError, ValueError):
+            pass
         user_msg = store.add_message(
             conn, chat_id, author_kind="user", author_user_id=user["id"],
             author_name=user["display_name"], text=text,
             thread_root_id=body.get("thread_root_id"),
-            attachments=body.get("attachments") or [])
+            attachments=body.get("attachments") or [],
+            reply_to_id=reply_msg["id"] if reply_msg else None)
         # Автоназвание сессии с агентом — из первого сообщения.
         if (chat["kind"] == "agent" and chat["title"] == store.DEFAULT_AGENT_TITLE
                 and store.message_count(conn, chat_id) == 1):
@@ -643,8 +670,14 @@ async def api_send(chat_id: int, request: Request):
             except (TypeError, ValueError):
                 pass
         store.rebind_uploads(conn, upload_ids, chat_id, user)
-        call_agent = chat["kind"] == "agent" or store.mentions_agent(text)
+        # Агента зовут: его чат, @агент, или ответ на его сообщение.
+        call_agent = (chat["kind"] == "agent" or store.mentions_agent(text)
+                      or bool(reply_msg and reply_msg["author_kind"] == "agent"))
         prompt = text
+        if reply_msg and call_agent:
+            q = " ".join((reply_msg["text"] or "").split())[:600]
+            prompt = (f"[Это ответ на сообщение от "
+                      f"{reply_msg['author_name']}: «{q}»]\n{text}")
         # Приложенные файлы: агенту — абсолютные пути, гарду — разрешение читать.
         attach_files: list[str] = []
         attach_note = ""
@@ -688,7 +721,7 @@ async def api_send(chat_id: int, request: Request):
                     m["text"] = ((m["text"] or "") +
                                  "\n[вложения: " + "; ".join(notes) + "]").strip()
             prompt = (prompts.channel_context(recent) +
-                      f"{user['display_name']}: {text}")
+                      f"{user['display_name']}: {prompt}")
         prompt += attach_note
     except store.StoreError as exc:
         return _err(exc)
@@ -769,16 +802,24 @@ async def api_changes(request: Request, since: int = -1, chat: int = 0):
                 typing_names.append(uid)
     conn = store.connect()
     try:
+        if chat:
+            try:
+                store.require_chat(conn, chat, user)
+            except store.StoreError:
+                chat, typing_names = 0, []
         if typing_names:
             typing_names = [store.get_user(conn, uid)["display_name"]
                             for uid in typing_names]
+        reads = store.chat_reads_info(conn, chat) if chat else []
         if since < 0:
             return {"now": store.max_change_id(conn), "events": [],
-                    "online_ids": online, "typing": typing_names}
+                    "online_ids": online, "typing": typing_names,
+                    "reads": reads}
         events = store.changes_since(conn, me(request), since)
         now = events[-1]["id"] if events else since
         return {"now": now, "events": events,
-                "online_ids": online, "typing": typing_names}
+                "online_ids": online, "typing": typing_names,
+                "reads": reads}
     finally:
         conn.close()
 

@@ -76,9 +76,13 @@ def init_db(conn: sqlite3.Connection) -> None:
     # Догоняющие миграции: CREATE IF NOT EXISTS не меняет существующую таблицу.
     cols = {r[1] for r in conn.execute("PRAGMA table_info(messages)")}
     for col, ctype in (("edited_at", "TEXT"), ("deleted_at", "TEXT"),
-                       ("pinned_at", "TEXT"), ("pinned_by", "INTEGER")):
+                       ("pinned_at", "TEXT"), ("pinned_by", "INTEGER"),
+                       ("reply_to_id", "INTEGER")):
         if col not in cols:
             conn.execute(f"ALTER TABLE messages ADD COLUMN {col} {ctype}")
+    rcols = {r[1] for r in conn.execute("PRAGMA table_info(chat_reads)")}
+    if "read_at" not in rcols:
+        conn.execute("ALTER TABLE chat_reads ADD COLUMN read_at TEXT")
 
 
 # --------------------------------------------------------------- пользователи
@@ -466,12 +470,31 @@ def list_chats(conn: sqlite3.Connection, user: dict) -> list[dict]:
 def mark_read(conn: sqlite3.Connection, chat_id: int, user: dict,
               last_message_id: int) -> None:
     with write_tx(conn):
+        row = conn.execute(
+            "SELECT last_read_message_id FROM chat_reads"
+            " WHERE chat_id = ? AND user_id = ?", (chat_id, user["id"])).fetchone()
+        if row is not None and last_message_id <= row["last_read_message_id"]:
+            return  # ничего нового — не двигаем read_at и не шумим в changes
         conn.execute(
-            "INSERT INTO chat_reads(chat_id, user_id, last_read_message_id)"
-            " VALUES (?,?,?)"
-            " ON CONFLICT(chat_id, user_id) DO UPDATE SET last_read_message_id ="
-            "   MAX(last_read_message_id, excluded.last_read_message_id)",
+            f"INSERT INTO chat_reads(chat_id, user_id, last_read_message_id, read_at)"
+            f" VALUES (?,?,?,{NOW_SQL})"
+            f" ON CONFLICT(chat_id, user_id) DO UPDATE SET"
+            f"   last_read_message_id = MAX(last_read_message_id,"
+            f"     excluded.last_read_message_id),"
+            f"   read_at = excluded.read_at",
             (chat_id, user["id"], last_message_id))
+        _add_change(conn, chat_id, "read", user["id"])
+
+
+def chat_reads_info(conn: sqlite3.Connection, chat_id: int) -> list[dict]:
+    """Кто из участников до какого сообщения дочитал и когда (для галочек
+    и списка «кто прочитал»)."""
+    rows = conn.execute(
+        "SELECT r.user_id, u.display_name AS name, r.last_read_message_id,"
+        "       r.read_at"
+        " FROM chat_reads r JOIN users u ON u.id = r.user_id"
+        " WHERE r.chat_id = ?", (chat_id,)).fetchall()
+    return [dict(r) for r in rows]
 
 
 # --------------------------------------------------------------- сообщения
@@ -493,16 +516,17 @@ def add_message(conn: sqlite3.Connection, chat_id: int, *, author_kind: str,
                 author_user_id: Optional[int], author_name: str, text: str,
                 thread_root_id: Optional[int] = None,
                 attachments: Optional[list] = None,
-                status: str = "final", turn_id: Optional[int] = None) -> dict:
+                status: str = "final", turn_id: Optional[int] = None,
+                reply_to_id: Optional[int] = None) -> dict:
     with write_tx(conn):
         cur = conn.execute(
             f"INSERT INTO messages(chat_id, author_kind, author_user_id, author_name,"
             f" text, thread_root_id, attachments_json, status, turn_id,"
-            f" created_at, updated_at)"
-            f" VALUES (?,?,?,?,?,?,?,?,?,{NOW_SQL},{NOW_SQL})",
+            f" reply_to_id, created_at, updated_at)"
+            f" VALUES (?,?,?,?,?,?,?,?,?,?,{NOW_SQL},{NOW_SQL})",
             (chat_id, author_kind, author_user_id, author_name, text,
              thread_root_id, json.dumps(attachments or [], ensure_ascii=False),
-             status, turn_id))
+             status, turn_id, reply_to_id))
         msg_id = cur.lastrowid
         for uid in _parse_mentions(conn, text):
             conn.execute("INSERT OR IGNORE INTO mentions(message_id, user_id)"
@@ -528,6 +552,16 @@ def _msg_dict(conn: sqlite3.Connection, row: sqlite3.Row) -> dict:
         msg["reply_count"] = conn.execute(
             "SELECT COUNT(*) AS n FROM messages WHERE thread_root_id = ?",
             (msg["id"],)).fetchone()["n"]
+    if msg.get("reply_to_id"):
+        r = conn.execute(
+            "SELECT id, author_name, text, deleted_at FROM messages WHERE id = ?",
+            (msg["reply_to_id"],)).fetchone()
+        if r is not None:
+            quote = " ".join((r["text"] or "").split())
+            msg["reply_to"] = {
+                "id": r["id"], "author_name": r["author_name"],
+                "text": quote[:160] + ("…" if len(quote) > 160 else ""),
+                "deleted": bool(r["deleted_at"])}
     return msg
 
 
@@ -620,6 +654,52 @@ def delete_message(conn: sqlite3.Connection, msg_id: int, user: dict) -> None:
         conn.execute("DELETE FROM mentions WHERE message_id = ?", (msg_id,))
         conn.execute("DELETE FROM reactions WHERE message_id = ?", (msg_id,))
         _add_change(conn, row["chat_id"], "message_upd", msg_id)
+
+
+def replies_to_thread(conn: sqlite3.Connection, msg_id: int) -> dict:
+    """Перевести цепочку ответов (reply_to_id) в тред: находим корень цепочки,
+    все связанные с ним ответы уходят из ленты в его тред. Возвращает корень."""
+    with write_tx(conn):
+        row = conn.execute("SELECT * FROM messages WHERE id = ?",
+                           (msg_id,)).fetchone()
+        if row is None:
+            raise NotFound("нет такого сообщения")
+        if row["thread_root_id"]:
+            raise StoreError("сообщение уже в треде")
+        chat_id = row["chat_id"]
+        # Вверх к корню цепочки.
+        root = row
+        seen = {row["id"]}
+        while root["reply_to_id"]:
+            parent = conn.execute("SELECT * FROM messages WHERE id = ?",
+                                  (root["reply_to_id"],)).fetchone()
+            if (parent is None or parent["thread_root_id"]
+                    or parent["id"] in seen):
+                break
+            seen.add(parent["id"])
+            root = parent
+        # Вниз по всем ответвлениям в этой же ленте.
+        chain = {root["id"]}
+        frontier = [root["id"]]
+        while frontier:
+            qmarks = ",".join("?" * len(frontier))
+            rows = conn.execute(
+                f"SELECT id FROM messages WHERE chat_id = ?"
+                f" AND thread_root_id IS NULL AND reply_to_id IN ({qmarks})",
+                (chat_id, *frontier)).fetchall()
+            frontier = [r["id"] for r in rows if r["id"] not in chain]
+            chain.update(frontier)
+        moved = sorted(chain - {root["id"]})
+        if not moved:
+            raise StoreError("у этого сообщения нет цепочки ответов")
+        qmarks = ",".join("?" * len(moved))
+        conn.execute(
+            f"UPDATE messages SET thread_root_id = ?, updated_at = {NOW_SQL}"
+            f" WHERE id IN ({qmarks})", (root["id"], *moved))
+        for mid in moved:
+            _add_change(conn, chat_id, "message_upd", mid)
+        _add_change(conn, chat_id, "message_upd", root["id"])
+    return get_message(conn, root["id"])
 
 
 def toggle_pin(conn: sqlite3.Connection, msg_id: int, user: dict) -> bool:

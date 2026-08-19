@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
@@ -25,6 +26,8 @@ from claude_agent_sdk import (
     ResultMessage,
     TextBlock,
     ToolUseBlock,
+    create_sdk_mcp_server,
+    tool,
 )
 
 import gitops
@@ -46,6 +49,12 @@ DB_THROTTLE = 1.5               # сек между апдейтами стри�
 CHANNEL_CONTEXT_MESSAGES = 100
 
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit")
+FS_TOOLS = ("mcp__fs__copy_file", "mcp__fs__move_file", "mcp__fs__delete_file")
+# Deny-by-default: CLI-харнес объявляет агенту множество своих инструментов
+# (ToolSearch, Cron*, SendMessage, Task* и т.п.) — всё, чего нет в этом
+# белом списке, режется гардом до выполнения.
+SAFE_TOOLS = frozenset(WRITE_TOOLS) | set(FS_TOOLS) | {
+    "Read", "Grep", "Glob", "TodoWrite"}
 
 
 def _deny(message: str) -> dict:
@@ -56,6 +65,85 @@ def _deny(message: str) -> dict:
 
 def _tool_path(tool_input: dict) -> Optional[str]:
     return tool_input.get("file_path") or tool_input.get("path") or None
+
+
+async def whitelist_guard(input_data, tool_use_id, context):
+    name = input_data.get("tool_name") or ""
+    if name not in SAFE_TOOLS:
+        return _deny(f"инструмент «{name}» запрещён в этом сервисе")
+    return {}
+
+
+def _make_fs_server(scopes: dict, extra_read: set):
+    """Байтовые файловые операции: Write пишет только текст, который агент сам
+    формирует, поэтому картинку или docx он без этих тулзов не перенесёт.
+    Права те же, что у гардов: читать — read-корни + extra_read, писать —
+    write-корни; .git закрыт."""
+    read_roots = [p.resolve() for p in scopes["read"]]
+    write_roots = [p.resolve() for p in scopes["write"]]
+
+    def _resolve(raw: str) -> Path:
+        p = Path(raw)
+        if not p.is_absolute():
+            p = VAULT / "shared" / p
+        return p.resolve()
+
+    def _ok(text: str) -> dict:
+        return {"content": [{"type": "text", "text": text}]}
+
+    def _err(text: str) -> dict:
+        return {"content": [{"type": "text", "text": text}], "is_error": True}
+
+    def _readable(p: Path) -> bool:
+        return (".git" not in p.parts
+                and (vaultlib.path_under(p, read_roots) or p in extra_read))
+
+    def _writable(p: Path) -> bool:
+        return ".git" not in p.parts and vaultlib.path_under(p, write_roots)
+
+    @tool("copy_file", "Скопировать файл байт-в-байт (картинки, docx и другие "
+          "нетекстовые файлы). src — любой доступный тебе для чтения файл, "
+          "dst — путь внутри твоих областей записи.",
+          {"src": str, "dst": str})
+    async def copy_file(args):
+        src, dst = _resolve(args["src"]), _resolve(args["dst"])
+        if not _readable(src):
+            return _err(f"src вне доступных тебе областей: {src}")
+        if not src.is_file():
+            return _err(f"src не существует: {src}")
+        if not _writable(dst):
+            return _err(f"dst вне твоих областей записи: {dst}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(src, dst)
+        return _ok(f"скопировано: {src} -> {dst}")
+
+    @tool("move_file", "Переместить или переименовать файл внутри твоих "
+          "областей записи.", {"src": str, "dst": str})
+    async def move_file(args):
+        src, dst = _resolve(args["src"]), _resolve(args["dst"])
+        if not _writable(src):
+            return _err(f"src вне твоих областей записи: {src}")
+        if not src.is_file():
+            return _err(f"src не существует: {src}")
+        if not _writable(dst):
+            return _err(f"dst вне твоих областей записи: {dst}")
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(src), str(dst))
+        return _ok(f"перемещено: {src} -> {dst}")
+
+    @tool("delete_file", "Удалить файл в твоих областях записи "
+          "(git сохраняет историю, удаление откатываемо).", {"path": str})
+    async def delete_file(args):
+        p = _resolve(args["path"])
+        if not _writable(p):
+            return _err(f"путь вне твоих областей записи: {p}")
+        if not p.is_file():
+            return _err(f"не файл или не существует: {p}")
+        p.unlink()
+        return _ok(f"удалено: {p}")
+
+    return create_sdk_mcp_server(name="fs", version="1.0.0",
+                                 tools=[copy_file, move_file, delete_file])
 
 
 def _make_guards(scopes: dict, extra_read: set):
@@ -151,12 +239,16 @@ class AgentSession:
             model=MODEL,
             cwd=str(VAULT / "shared"),
             add_dirs=add_dirs,
-            allowed_tools=["Read", "Grep", "Glob", "Edit", "Write", "TodoWrite"],
-            disallowed_tools=["Bash", "Task", "WebSearch", "WebFetch",
-                              "NotebookEdit"],
+            allowed_tools=["Read", "Grep", "Glob", "Edit", "Write", "TodoWrite",
+                           *FS_TOOLS],
+            disallowed_tools=["Bash", "Task", "Agent", "WebSearch", "WebFetch",
+                              "NotebookEdit", "ToolSearch", "SlashCommand"],
             permission_mode="acceptEdits",
             setting_sources=[],
+            mcp_servers={"fs": _make_fs_server(scopes, self.extra_read)},
             hooks={"PreToolUse": [
+                # matcher=None — на все инструменты; deny любого хука побеждает
+                HookMatcher(matcher=None, hooks=[whitelist_guard]),
                 HookMatcher(matcher="Edit|Write|MultiEdit", hooks=[write_guard]),
                 HookMatcher(matcher="Read|Grep|Glob", hooks=[read_guard]),
             ]},
@@ -213,7 +305,10 @@ class SessionManager:
                 conn, chat["id"], author_kind="agent", author_user_id=None,
                 author_name=store.AGENT_NAME, text="",
                 thread_root_id=user_msg.get("thread_root_id"),
-                status="streaming", turn_id=turn_id)
+                status="streaming", turn_id=turn_id,
+                # На ответ (как в ТГ) агент отвечает тоже ответом.
+                reply_to_id=(user_msg["id"] if user_msg.get("reply_to_id")
+                             else None))
         finally:
             conn.close()
         session = self._get_session(chat)
@@ -348,13 +443,25 @@ class SessionManager:
                                      "input": _short_input(block.input)}
                             tools.append(entry)
                             await job.emit("tool", **entry)
+                            keys: tuple[str, ...] = ()
                             if block.name in WRITE_TOOLS:
-                                raw = _tool_path(block.input or {})
-                                if raw:
-                                    p = Path(raw)
-                                    if not p.is_absolute():
-                                        p = VAULT / "shared" / p
-                                    touched.append(p)
+                                keys = ("file_path", "path")
+                            elif block.name.endswith("copy_file"):
+                                keys = ("dst",)
+                            elif block.name.endswith("move_file"):
+                                keys = ("src", "dst")   # src — удаление
+                            elif block.name.endswith("delete_file"):
+                                keys = ("path",)
+                            for key in keys:
+                                raw = (block.input or {}).get(key)
+                                if not raw:
+                                    continue
+                                p = Path(raw)
+                                if not p.is_absolute():
+                                    p = VAULT / "shared" / p
+                                touched.append(p)
+                                if block.name in WRITE_TOOLS:
+                                    break  # file_path ИЛИ path — один файл
                 elif isinstance(msg, ResultMessage):
                     sdk_session_id = getattr(msg, "session_id", None)
                     cost = getattr(msg, "total_cost_usd", None)
