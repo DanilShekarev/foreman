@@ -156,21 +156,47 @@ const APP = (() => {
   };
 
   function maybeNotify(){
-    if (prevUnread && notifyEnabled()){
+    if (prevUnread){
+      let sound = null;  // за один поллинг — один звук: упоминание важнее
       for (const c of chats){
         const grew = (c.unread || 0) > (prevUnread[c.id] || 0);
         if (!grew) continue;
         // Не дёргаем, если чат открыт прямо сейчас во вкладке в фокусе.
         if (!document.hidden && CHAT.currentId() === c.id) continue;
+        sound = c.mentioned ? "mention" : (sound || "msg");
+        if (!notifyEnabled()) continue;
         const icon = c.kind === "agent" ? "🤖" : c.kind === "dm" ? "✉️" : "#";
         const n = new Notification(
           c.mentioned ? "Вас упомянули" : "Новое сообщение",
           {body: `${icon} ${c.title}`, tag: "gd-chat-" + c.id});
         n.onclick = () => { window.focus(); selectChat(c.id); n.close(); };
       }
+      if (sound === "mention") SOUND.mention();
+      else if (sound === "msg") SOUND.msg();
     }
     prevUnread = Object.fromEntries(chats.map(c => [c.id, c.unread || 0]));
   }
+
+  // --------------------------------------------------------------- звук
+
+  const soundBtn = document.getElementById("btn-sound");
+
+  function updateSoundBtn(){
+    soundBtn.textContent = SOUND.isOn() ? "🔊" : "🔇";
+    soundBtn.title = SOUND.isOn()
+      ? `Звук включён (${Math.round(SOUND.volume() * 100)}%) — клик выключает,` +
+        " колесо мыши меняет громкость"
+      : "Звук выключен — клик включает";
+  }
+
+  soundBtn.onclick = () => { SOUND.toggle(); updateSoundBtn(); };
+  soundBtn.addEventListener("wheel", e => {
+    if (!SOUND.isOn()) return;
+    e.preventDefault();
+    SOUND.bumpVol(e.deltaY < 0 ? 0.05 : -0.05);
+    updateSoundBtn();
+  }, {passive: false});
+  updateSoundBtn();
 
   function renderChatLists(){
     renderList(listAgent, chats.filter(c => c.kind === "agent"));

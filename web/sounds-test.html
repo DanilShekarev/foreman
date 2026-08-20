@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Звуки — демо для утверждения</title>
+<style>
+:root{
+  --bg0:#0f1115; --bg1:#171a21; --bg2:#1e222b; --bg3:#262b35;
+  --border:#2b303b; --border-strong:#3a4150;
+  --fg:#e7eaf0; --fg-dim:#9aa3b2; --fg-faint:#697180;
+  --accent:#6ea8fe; --accent-soft:rgba(110,168,254,.14); --on-accent:#0c1524;
+  --green:#7fc98f; --radius:10px; --radius-sm:7px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg0);color:var(--fg);
+  font:14px/1.55 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  display:flex;justify-content:center;padding:28px 16px 60px}
+main{width:100%;max-width:760px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--fg-dim);margin:0 0 22px}
+.vol{display:flex;align-items:center;gap:10px;margin:0 0 20px;
+  background:var(--bg1);border:1px solid var(--border);
+  border-radius:var(--radius);padding:10px 14px}
+.vol input{flex:1;accent-color:var(--accent)}
+.group{background:var(--bg1);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px 16px;margin-bottom:14px}
+.group h2{font-size:15px;margin:0 0 3px}
+.group .hint{color:var(--fg-faint);font-size:12.5px;margin:0 0 10px}
+.opt{display:flex;align-items:center;gap:10px;padding:7px 8px;
+  border-radius:var(--radius-sm);cursor:pointer}
+.opt:hover{background:var(--bg2)}
+.opt.sel{background:var(--accent-soft)}
+.opt input{accent-color:var(--accent)}
+.opt .name{flex:1}
+.opt .desc{color:var(--fg-faint);font-size:12px}
+.play{background:var(--bg2);color:var(--fg);border:1px solid var(--border);
+  border-radius:50%;width:32px;height:32px;font-size:13px;cursor:pointer;
+  flex-shrink:0;transition:background .12s}
+.play:hover{background:var(--bg3);border-color:var(--border-strong)}
+.play:active{transform:translateY(1px)}
+#summary{background:var(--bg1);border:1px solid var(--accent);
+  border-radius:var(--radius);padding:14px 16px;margin-top:20px}
+#summary h2{font-size:15px;margin:0 0 8px}
+#summary div{margin:2px 0}
+#summary b{color:var(--accent)}
+#summary .none{color:var(--fg-faint)}
+.demo-all{margin-top:14px;background:var(--accent);color:var(--on-accent);
+  border:none;border-radius:var(--radius-sm);padding:9px 16px;font:inherit;
+  cursor:pointer}
+.demo-all:hover{filter:brightness(1.1)}
+</style>
+</head>
+<body>
+<main>
+  <h1>🔊 Звуки Foreman — на утверждение</h1>
+  <p class="sub">Нажимай ▶ и слушай. В каждой группе отметь вариант, который
+    нравится (или «без звука»). Внизу соберётся итог — его и скажи агенту.</p>
+
+  <div class="vol">
+    🔉 Громкость
+    <input type="range" id="vol" min="0" max="100" value="50">
+    <span id="vol-label">50%</span>
+  </div>
+
+  <div id="groups"></div>
+
+  <div id="summary">
+    <h2>Итог (скажи агенту)</h2>
+    <div id="summary-body" class="none">пока ничего не выбрано</div>
+    <button class="demo-all" id="demo-all">▶ Проиграть выбранное подряд</button>
+  </div>
+</main>
+
+<script>
+"use strict";
+// Все звуки синтезируются Web Audio — так же они будут жить и в приложении:
+// без файлов, без запросов, ~10 строк на звук.
+let ctx = null;
+function ac(){
+  if (!ctx) ctx = new (window.AudioContext || window.webkitAudioContext)();
+  if (ctx.state === "suspended") ctx.resume();
+  return ctx;
+}
+let master = 0.5;
+document.getElementById("vol").oninput = e => {
+  master = e.target.value / 100;
+  document.getElementById("vol-label").textContent = e.target.value + "%";
+};
+
+// Примитивы -----------------------------------------------------------------
+
+// Один тон с атакой/затуханием. sweep — куда уехать частотой к концу.
+function tone(freq, {type = "sine", at = 0, dur = 0.15, vol = 1,
+                     sweep = null, attack = 0.004} = {}){
+  const a = ac(), t0 = a.currentTime + at;
+  const o = a.createOscillator(), g = a.createGain();
+  o.type = type;
+  o.frequency.setValueAtTime(freq, t0);
+  if (sweep) o.frequency.exponentialRampToValueAtTime(sweep, t0 + dur);
+  g.gain.setValueAtTime(0, t0);
+  g.gain.linearRampToValueAtTime(vol * master, t0 + attack);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g).connect(a.destination);
+  o.start(t0); o.stop(t0 + dur + 0.05);
+}
+
+// Короткий фильтрованный шум («тук», «пшш»).
+function noiseBurst({at = 0, dur = 0.08, vol = 1, freq = 900, q = 6,
+                     sweep = null} = {}){
+  const a = ac(), t0 = a.currentTime + at;
+  const len = Math.ceil(a.sampleRate * dur);
+  const buf = a.createBuffer(1, len, a.sampleRate);
+  const d = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+  const src = a.createBufferSource(); src.buffer = buf;
+  const f = a.createBiquadFilter();
+  f.type = "bandpass"; f.Q.value = q;
+  f.frequency.setValueAtTime(freq, t0);
+  if (sweep) f.frequency.exponentialRampToValueAtTime(sweep, t0 + dur);
+  const g = a.createGain();
+  g.gain.setValueAtTime(vol * master, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(f).connect(g).connect(a.destination);
+  src.start(t0); src.stop(t0 + dur + 0.02);
+}
+
+// Библиотека звуков ---------------------------------------------------------
+
+const SOUNDS = {
+  // ---- входящее сообщение
+  "msg-pop":   () => tone(880, {dur: 0.09, vol: .5, sweep: 520}),
+  "msg-ding":  () => { tone(1318, {dur: .35, vol: .35});
+                       tone(2637, {dur: .22, vol: .1}); },
+  "msg-knock": () => { noiseBurst({freq: 700, dur: .05, vol: .8});
+                       noiseBurst({at: .11, freq: 620, dur: .06, vol: .7}); },
+  "msg-drop":  () => tone(1200, {dur: .16, vol: .4, sweep: 340}),
+  "msg-blip":  () => { tone(660, {dur: .06, vol: .4});
+                       tone(990, {at: .07, dur: .09, vol: .4}); },
+
+  // ---- упоминание / зовут именно тебя
+  "men-dingdong": () => { tone(1568, {dur: .25, vol: .35});
+                          tone(1175, {at: .16, dur: .4, vol: .35}); },
+  "men-trill":    () => { for (let i = 0; i < 3; i++)
+                            tone(1760, {at: i * .07, dur: .05, vol: .3}); },
+  "men-double":   () => { tone(1318, {dur: .18, vol: .35});
+                          tone(1318, {at: .22, dur: .3, vol: .35}); },
+
+  // ---- агент закончил ход
+  "agent-arp":   () => { tone(523, {dur: .12, vol: .3});
+                         tone(659, {at: .09, dur: .12, vol: .3});
+                         tone(784, {at: .18, dur: .3, vol: .3}); },
+  "agent-soft":  () => { tone(523, {dur: .5, vol: .2});
+                         tone(659, {dur: .5, vol: .2});
+                         tone(784, {dur: .5, vol: .16}); },
+  "agent-up":    () => { tone(587, {dur: .1, vol: .3});
+                         tone(880, {at: .1, dur: .28, vol: .3}); },
+
+  // ---- отправка своего сообщения
+  "send-swoosh": () => noiseBurst({freq: 500, sweep: 3500, dur: .16, vol: .5, q: 3}),
+  "send-tick":   () => tone(1400, {type: "triangle", dur: .04, vol: .35}),
+  "send-pop":    () => tone(520, {dur: .08, vol: .4, sweep: 880}),
+
+  // ---- ошибка (агент упал, запрос не прошёл)
+  "err-low":    () => tone(220, {type: "square", dur: .2, vol: .15, sweep: 130}),
+  "err-double": () => { tone(311, {type: "triangle", dur: .12, vol: .3});
+                        tone(233, {type: "triangle", at: .14, dur: .25, vol: .3}); },
+};
+
+const GROUPS = [
+  {key: "msg", title: "Входящее сообщение", hint:
+     "Главный звук: новое сообщение в любом чате, когда вкладка не в фокусе или чат не открыт.",
+   opts: [
+     ["msg-pop",   "Поп",      "мягкий, почти незаметный"],
+     ["msg-ding",  "Динь",     "колокольчик с обертоном"],
+     ["msg-knock", "Тук-тук",  "деревянный, как в Slack"],
+     ["msg-drop",  "Капля",    "ниспадающий, спокойный"],
+     ["msg-blip",  "Блип",     "два тона вверх, мессенджерный"],
+   ]},
+  {key: "mention", title: "Упоминание @тебя", hint:
+     "Заметнее обычного сообщения: тебя позвали по имени. Можно оставить тот же звук, что и для сообщений — тогда выбери «без звука».",
+   opts: [
+     ["men-dingdong", "Динь-дон", "двухтональный, дверной"],
+     ["men-trill",    "Трель",    "три быстрых импульса"],
+     ["men-double",   "Двойной динь", "настойчивый повтор"],
+   ]},
+  {key: "agent", title: "Агент закончил ход", hint:
+     "Долгий ход агента завершён — можно вернуться и читать ответ.",
+   opts: [
+     ["agent-arp",  "Арпеджио",   "три ноты вверх, «готово!»"],
+     ["agent-soft", "Аккорд",     "мягкий, ненавязчивый"],
+     ["agent-up",   "Два тона",   "короткое «та-дам»"],
+   ]},
+  {key: "send", title: "Отправка своего сообщения", hint:
+     "Обратная связь на Enter. Многим мешает — «без звука» тоже нормальный выбор.",
+   opts: [
+     ["send-swoosh", "Свуш", "шелест улетевшего письма"],
+     ["send-tick",   "Тик",  "едва слышный щелчок"],
+     ["send-pop",    "Поп вверх", "лёгкий восходящий"],
+   ]},
+  {key: "error", title: "Ошибка", hint:
+     "Ход агента упал или запрос не прошёл.",
+   opts: [
+     ["err-low",    "Буп",         "низкий, приглушённый"],
+     ["err-double", "Двойной вниз", "две ноты вниз, «увы»"],
+   ]},
+];
+
+const chosen = {};  // key группы -> id звука | "" (без звука)
+
+const groupsEl = document.getElementById("groups");
+for (const g of GROUPS){
+  const box = document.createElement("div");
+  box.className = "group";
+  box.innerHTML = `<h2>${g.title}</h2><p class="hint">${g.hint}</p>`;
+  const opts = [...g.opts, ["", "Без звука", "это событие не озвучивать"]];
+  for (const [id, name, desc] of opts){
+    const row = document.createElement("label");
+    row.className = "opt";
+    row.innerHTML = `
+      ${id ? `<button class="play" title="Послушать">▶</button>`
+           : `<span style="width:32px;text-align:center">🔇</span>`}
+      <input type="radio" name="${g.key}" value="${id}">
+      <span class="name">${name}</span><span class="desc">${desc}</span>`;
+    const play = row.querySelector(".play");
+    if (play) play.onclick = e => { e.preventDefault(); SOUNDS[id](); };
+    row.querySelector("input").onchange = () => {
+      chosen[g.key] = id;
+      box.querySelectorAll(".opt").forEach(o => o.classList.remove("sel"));
+      row.classList.add("sel");
+      if (id) SOUNDS[id]();
+      renderSummary();
+    };
+    box.appendChild(row);
+  }
+  groupsEl.appendChild(box);
+}
+
+const TITLES = Object.fromEntries(GROUPS.map(g => [g.key, g.title]));
+function label(gKey){
+  const g = GROUPS.find(x => x.key === gKey);
+  const id = chosen[gKey];
+  if (id === "") return "без звука";
+  const o = g.opts.find(x => x[0] === id);
+  return o ? `${o[1]} (${id})` : "?";
+}
+
+function renderSummary(){
+  const el = document.getElementById("summary-body");
+  const keys = Object.keys(chosen);
+  if (!keys.length){
+    el.className = "none"; el.textContent = "пока ничего не выбрано"; return;
+  }
+  el.className = "";
+  el.innerHTML = GROUPS.map(g => g.key in chosen
+    ? `<div>${g.title}: <b>${label(g.key)}</b></div>`
+    : `<div class="none">${g.title}: не выбрано</div>`).join("");
+}
+
+document.getElementById("demo-all").onclick = () => {
+  let at = 0;
+  for (const g of GROUPS){
+    const id = chosen[g.key];
+    if (!id) continue;
+    setTimeout(SOUNDS[id], at * 1000);
+    at += 0.9;
+  }
+};
+</script>
+</body>
+</html>

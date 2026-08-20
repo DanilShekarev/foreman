@@ -120,6 +120,17 @@ const VAULT = (() => {
     return cm;
   }
 
+  // Раскрытые папки дерева: по умолчанию всё свёрнуто, выбор пользователя
+  // переживает перерисовку дерева и перезагрузку страницы.
+  let openDirs = new Set();
+  try {
+    openDirs = new Set(JSON.parse(localStorage.getItem("gd_tree_open") || "[]"));
+  } catch (e) { /* битый localStorage — дефолт: всё свёрнуто */ }
+
+  function saveOpenDirs(){
+    localStorage.setItem("gd_tree_open", JSON.stringify([...openDirs]));
+  }
+
   async function refreshTree(){
     const r = await fetch("api/vault/tree");
     if (!r.ok) return;
@@ -134,12 +145,23 @@ const VAULT = (() => {
       if (n.dir){
         const d = document.createElement("div");
         d.className = "tree-dir";
-        d.innerHTML = `<div class="tree-label">📁 ${MD.esc(n.name)}</div>`;
+        d.innerHTML = `<div class="tree-label"></div>`;
+        const label = d.querySelector(".tree-label");
         const kids = renderNodes(n.children || []);
         kids.className = "tree-children";
         d.appendChild(kids);
-        d.querySelector(".tree-label").onclick = () =>
-          kids.style.display = kids.style.display === "none" ? "" : "none";
+        const paint = open => {
+          label.innerHTML = `${open ? "📂" : "📁"} ${MD.esc(n.name)}`;
+          kids.style.display = open ? "" : "none";
+        };
+        paint(openDirs.has(n.path));
+        label.onclick = () => {
+          const open = kids.style.display === "none";
+          paint(open);
+          if (open) openDirs.add(n.path);
+          else openDirs.delete(n.path);
+          saveOpenDirs();
+        };
         box.appendChild(d);
       } else {
         const f = document.createElement("div");

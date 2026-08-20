@@ -95,7 +95,7 @@ const CHAT = (() => {
       titleEl.textContent = chatLabel(current);
       APP.refreshChats();
     }
-    if (stick) messagesEl.scrollTop = messagesEl.scrollHeight;
+    if (stick) scrollBottom(messagesEl);
     if (data.messages.length){
       lastMsgId = data.messages[data.messages.length - 1].id;
       markRead();
@@ -108,6 +108,20 @@ const CHAT = (() => {
 
   function nearBottom(el){
     return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
+  }
+
+  // Прокрутка в самый низ. Картинки дорастают ПОСЛЕ вставки HTML и
+  // отодвигают конец ленты — дожимаем скролл по мере их загрузки, если
+  // пользователь не успел уйти заметно выше подгрузившейся картинки.
+  function scrollBottom(el){
+    el.scrollTop = el.scrollHeight;
+    el.querySelectorAll("img").forEach(img => {
+      if (img.complete) return;
+      img.addEventListener("load", () => {
+        const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+        if (gap < img.offsetHeight + 160) el.scrollTop = el.scrollHeight;
+      }, {once: true});
+    });
   }
 
   function markRead(){
@@ -598,8 +612,13 @@ const CHAT = (() => {
     const r = await fetch(`api/turn/${turnId}`);
     if (!r.ok) return;
     const turn = await r.json();
+    // Плашка и строки 🔧 приходят ПОСЛЕ отрисовки ленты и раздвигают её —
+    // если читатель был внизу, дожимаем скролл.
+    const scroller = div.closest("#messages, #thread-messages");
+    const stick = scroller && nearBottom(scroller);
     renderToolLines(div, turn.tools);
     renderTurnPlaque(div, turn);
+    if (stick) scroller.scrollTop = scroller.scrollHeight;
   }
 
   // Строки «🔧 инструмент» при перерисовке ленты — из tools_json хода.
@@ -678,9 +697,11 @@ const CHAT = (() => {
       });
       if (!resp.ok){
         const err = await resp.json().catch(() => ({}));
+        SOUND.error();
         alert(err.error || `ошибка ${resp.status}`);
         return;
       }
+      SOUND.send();
       const reader = resp.body.getReader();
       const decoder = new TextDecoder();
       let buf = "";
@@ -697,7 +718,7 @@ const CHAT = (() => {
           if (ev.type === "message"){
             container.appendChild(renderMessage(ev.message, {inThread: !!threadRootId}));
             if (!threadRootId) lastMsgId = ev.message.id;
-            container.scrollTop = container.scrollHeight;
+            scrollBottom(container);
           } else if (ev.type === "start"){
             agentDiv = document.createElement("div");
             agentDiv.className = "msg agent";
@@ -723,8 +744,10 @@ const CHAT = (() => {
           } else if (ev.type === "turn" && agentDiv){
             renderTurnPlaque(agentDiv, {id: ev.turn, files: ev.files || [],
                                         commit_hash: ev.commit, status: "done"});
+            SOUND.agent();
             VAULT.refreshTree();
           } else if (ev.type === "error"){
+            SOUND.error();
             const t = document.createElement("div");
             t.className = "msg system";
             t.style.color = "var(--red)";
@@ -906,7 +929,7 @@ const CHAT = (() => {
     threadMessagesEl.appendChild(rootDiv);
     appendWithDaySep(threadMessagesEl, data.messages, {inThread: true});
     applyTicks();
-    if (stick) threadMessagesEl.scrollTop = threadMessagesEl.scrollHeight;
+    if (stick) scrollBottom(threadMessagesEl);
   }
 
   async function threadSend(){
