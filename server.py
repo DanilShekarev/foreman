@@ -76,7 +76,7 @@ async def lifespan(app: FastAPI):
     await manager.stop()
 
 
-app = FastAPI(title="GD-ассистент", lifespan=lifespan, root_path=WEB_BASE)
+app = FastAPI(title="Foreman", lifespan=lifespan, root_path=WEB_BASE)
 
 
 # --------------------------------------------------------------- авторизация
@@ -95,7 +95,7 @@ class AuthMiddleware:
         # проверок; сам роутинг префикс снимает Starlette через root_path.
         if WEB_BASE and path.startswith(WEB_BASE):
             path = path[len(WEB_BASE):] or "/"
-        if path in ("/login", "/favicon.ico") or path.startswith("/invite/"):
+        if path in ("/login", "/favicon.ico", "/favicon.svg") or path.startswith("/invite/"):
             return await self.app(scope, receive, send)
         req = Request(scope)
         conn = store.connect()
@@ -105,6 +105,9 @@ class AuthMiddleware:
             conn.close()
         if user is not None:
             scope["state"] = {"user": user}
+            return await self.app(scope, receive, send)
+        # Гостям корень открыт: index_page по отсутствию state отдаст презентацию.
+        if path in ("/", "/index.html", "/present.html"):
             return await self.app(scope, receive, send)
         if path.startswith("/api"):
             resp = JSONResponse({"error": "auth required"}, status_code=401)
@@ -121,7 +124,7 @@ def me(request: Request) -> dict:
 
 
 _LOGIN_HTML = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Вход — GD-ассистент</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Вход — Foreman</title>
 <style>body{{background:#141518;color:#e8e6e3;font:16px/1.5 "Segoe UI",system-ui,sans-serif;
 display:grid;place-items:center;height:100vh;margin:0}}
 form{{background:#1d1f24;border:1px solid #33363d;border-radius:14px;padding:28px 26px;width:320px;text-align:center}}
@@ -133,16 +136,23 @@ button{{width:100%;background:#2b4c7e;color:#e8e6e3;border:1px solid #8ab4f8;bor
 padding:11px;font:inherit;cursor:pointer}}button:hover{{background:#35598f}}
 .err{{color:#e57373;font-size:13px;margin-bottom:10px;min-height:16px}}</style></head>
 <body><form method="post">
-<h1>🎮 GD-ассистент</h1>
+<h1><svg viewBox="0 0 24 24" width="21" height="21" style="vertical-align:-4px"><path fill="#f59d3d" d="M4.6 14v-1.2c0-4.6 3.3-8.3 7.4-8.3s7.4 3.7 7.4 8.3V14z"/><rect x="10.55" y="5.2" width="2.9" height="8.2" rx="1.2" fill="#fbd06e"/><rect x="6.9" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="15.1" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="4.2" y="14" width="15.6" height="1.7" fill="#ee7f2f"/><rect x="1.8" y="15.7" width="20.4" height="2.9" rx="1.45" fill="#f59d3d"/></svg> Foreman</h1>
 <div class="err">{err}</div>
 <input name="login" placeholder="Логин" autofocus autocomplete="username">
 <input type="password" name="password" placeholder="Пароль" autocomplete="current-password">
 <button type="submit">Войти</button></form></body></html>"""
 
 
-@app.get("/login", response_class=HTMLResponse)
-async def login_page() -> str:
-    return _LOGIN_HTML.format(err="")
+@app.get("/login")
+async def login_page(request: Request):
+    conn = store.connect()
+    try:
+        user = store.user_by_token(conn, request.cookies.get(AUTH_COOKIE, ""))
+    finally:
+        conn.close()
+    if user is not None:
+        return RedirectResponse(WEB_BASE + "/")
+    return HTMLResponse(_LOGIN_HTML.format(err=""))
 
 
 @app.post("/login")
@@ -168,7 +178,7 @@ async def login_submit(request: Request):
 
 
 _INVITE_HTML = """<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1"><title>Регистрация — GD-ассистент</title>
+<meta name="viewport" content="width=device-width, initial-scale=1"><title>Регистрация — Foreman</title>
 <style>body{{background:#141518;color:#e8e6e3;font:16px/1.5 "Segoe UI",system-ui,sans-serif;
 display:grid;place-items:center;height:100vh;margin:0}}
 form{{background:#1d1f24;border:1px solid #33363d;border-radius:14px;padding:28px 26px;width:340px;text-align:center}}
@@ -181,7 +191,7 @@ button{{width:100%;background:#2b4c7e;color:#e8e6e3;border:1px solid #8ab4f8;bor
 padding:11px;font:inherit;cursor:pointer}}button:hover{{background:#35598f}}
 .err{{color:#e57373;font-size:13px;margin-bottom:10px;min-height:16px}}</style></head>
 <body><form method="post">
-<h1>🎮 GD-ассистент</h1>
+<h1><svg viewBox="0 0 24 24" width="21" height="21" style="vertical-align:-4px"><path fill="#f59d3d" d="M4.6 14v-1.2c0-4.6 3.3-8.3 7.4-8.3s7.4 3.7 7.4 8.3V14z"/><rect x="10.55" y="5.2" width="2.9" height="8.2" rx="1.2" fill="#fbd06e"/><rect x="6.9" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="15.1" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="4.2" y="14" width="15.6" height="1.7" fill="#ee7f2f"/><rect x="1.8" y="15.7" width="20.4" height="2.9" rx="1.45" fill="#f59d3d"/></svg> Foreman</h1>
 <p>Вас пригласили. Придумайте логин и пароль.</p>
 <div class="err">{err}</div>
 <input name="login" placeholder="Логин (латиница, 2–32)" value="{login}" autofocus>
@@ -689,7 +699,10 @@ async def api_send(chat_id: int, request: Request):
                     lines.append(f"- {p} — «{title}»")
             attach_note = ("\n\n[К сообщению приложены файлы — открой инструментом"
                            " Read те, что нужны для ответа (картинки Read тоже"
-                           " показывает):\n" + "\n".join(lines) + "]") if lines else ""
+                           " показывает). Если файл нужно положить в волт —"
+                           " копируй инструментом copy_file (src — путь ниже),"
+                           " не перепечатывай содержимое через Write:\n"
+                           + "\n".join(lines) + "]") if lines else ""
             # Агенту доступны и все прежние вложения этого чата, не только
             # из сообщений с @агент.
             for f in store.list_chat_files(conn, chat_id, limit=200):
@@ -811,15 +824,198 @@ async def api_changes(request: Request, since: int = -1, chat: int = 0):
             typing_names = [store.get_user(conn, uid)["display_name"]
                             for uid in typing_names]
         reads = store.chat_reads_info(conn, chat) if chat else []
+        kanban_rev = store.kanban_rev(conn)
         if since < 0:
             return {"now": store.max_change_id(conn), "events": [],
                     "online_ids": online, "typing": typing_names,
-                    "reads": reads}
+                    "reads": reads, "vault": gitops.VERSION,
+                    "kanban": kanban_rev}
         events = store.changes_since(conn, me(request), since)
         now = events[-1]["id"] if events else since
         return {"now": now, "events": events,
                 "online_ids": online, "typing": typing_names,
-                "reads": reads}
+                "reads": reads, "vault": gitops.VERSION,
+                "kanban": kanban_rev}
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------- канбан задач
+
+@app.get("/api/kanban")
+async def api_kanban(request: Request):
+    conn = store.connect()
+    try:
+        return store.kanban_list(conn)
+    finally:
+        conn.close()
+
+
+@app.post("/api/kanban")
+async def api_kanban_create(request: Request):
+    body = await request.json()
+    user = me(request)
+    conn = store.connect()
+    try:
+        return store.kanban_create(
+            conn, body.get("title") or "", body=body.get("body") or "",
+            column=body.get("column") or "todo",
+            actor_name=user["display_name"], created_by=user["id"],
+            assignee_ids=[int(x) for x in body.get("assignees") or []],
+            priority=body.get("priority") or "normal",
+            due_date=body.get("due") or None,
+            label_ids=[int(x) for x in body.get("labels") or []])
+    except (store.StoreError, ValueError) as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+# Роуты меток — строго ДО /api/kanban/{card_id}: матчинг идёт по порядку
+# регистрации, иначе «labels» уедет в card_id.
+
+@app.post("/api/kanban/labels")
+async def api_kanban_label_create(request: Request):
+    body = await request.json()
+    conn = store.connect()
+    try:
+        return store.kanban_label_create(conn, body.get("name") or "",
+                                         body.get("color") or "")
+    except (store.StoreError, ValueError) as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.patch("/api/kanban/labels/{label_id}")
+async def api_kanban_label_update(label_id: int, request: Request):
+    body = await request.json()
+    conn = store.connect()
+    try:
+        kwargs = {}
+        if "name" in body:
+            kwargs["name"] = body["name"] or ""
+        if "color" in body:
+            kwargs["color"] = body["color"] or ""
+        return store.kanban_label_update(conn, label_id, **kwargs)
+    except (store.StoreError, ValueError) as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.delete("/api/kanban/labels/{label_id}")
+async def api_kanban_label_delete(label_id: int, request: Request):
+    conn = store.connect()
+    try:
+        store.kanban_label_delete(conn, label_id)
+        return {"ok": True}
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.get("/api/kanban/{card_id}")
+async def api_kanban_card(card_id: int, request: Request):
+    conn = store.connect()
+    try:
+        return store.kanban_card_full(conn, card_id)
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.patch("/api/kanban/{card_id}")
+async def api_kanban_update(card_id: int, request: Request):
+    body = await request.json()
+    user = me(request)
+    conn = store.connect()
+    try:
+        kwargs = {"actor_id": user["id"], "actor_name": user["display_name"]}
+        if "title" in body:
+            kwargs["title"] = body["title"] or ""
+        if "body" in body:
+            kwargs["body"] = body["body"] or ""
+        if "column" in body:
+            kwargs["column"] = body["column"] or ""
+        if body.get("position") is not None:
+            kwargs["position"] = float(body["position"])
+        if "assignees" in body:
+            kwargs["assignee_ids"] = [int(x) for x in body["assignees"] or []]
+        if "archived" in body:
+            kwargs["archived"] = bool(body["archived"])
+        if "priority" in body:
+            kwargs["priority"] = body["priority"] or "normal"
+        if "due" in body:
+            kwargs["due_date"] = body["due"] or None
+        if "labels" in body:
+            kwargs["label_ids"] = [int(x) for x in body["labels"] or []]
+        return store.kanban_update(conn, card_id, **kwargs)
+    except (store.StoreError, ValueError) as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.post("/api/kanban/{card_id}/comments")
+async def api_kanban_comment(card_id: int, request: Request):
+    body = await request.json()
+    user = me(request)
+    conn = store.connect()
+    try:
+        return store.kanban_comment_add(
+            conn, card_id, body.get("text") or "",
+            author_id=user["id"], author_name=user["display_name"])
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.post("/api/kanban/{card_id}/checklist")
+async def api_kanban_check_add(card_id: int, request: Request):
+    body = await request.json()
+    user = me(request)
+    conn = store.connect()
+    try:
+        return store.kanban_check_add(
+            conn, card_id, body.get("text") or "",
+            actor_id=user["id"], actor_name=user["display_name"])
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.patch("/api/kanban/checklist/{item_id}")
+async def api_kanban_check_set(item_id: int, request: Request):
+    body = await request.json()
+    conn = store.connect()
+    try:
+        kwargs = {}
+        if "done" in body:
+            kwargs["done"] = bool(body["done"])
+        if "text" in body:
+            kwargs["text"] = body["text"] or ""
+        return store.kanban_check_set(conn, item_id, **kwargs)
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.delete("/api/kanban/checklist/{item_id}")
+async def api_kanban_check_delete(item_id: int, request: Request):
+    user = me(request)
+    conn = store.connect()
+    try:
+        store.kanban_check_delete(conn, item_id, actor_id=user["id"],
+                                  actor_name=user["display_name"])
+        return {"ok": True}
+    except store.StoreError as exc:
+        return _err(exc)
     finally:
         conn.close()
 
@@ -1038,6 +1234,45 @@ async def api_vault_upload(request: Request, file: UploadFile, folder: str = "sh
     return {"ok": True, "path": rel, "commit": commit}
 
 
+@app.post("/api/vault/upload_image")
+async def api_vault_upload_image(request: Request, file: UploadFile, doc: str = ""):
+    """Картинка из редактора (paste/drag). Кладётся в _assets рядом с самим
+    документом (личные картинки не утекают в shared) и коммитится сразу —
+    mtime документа не трогается, optimistic lock редактора цел."""
+    user = me(request)
+    if not doc:
+        return JSONResponse({"error": "не указан документ"}, status_code=400)
+    data = await file.read()
+    if len(data) > 10 * 1024 * 1024:
+        return JSONResponse({"error": "картинка больше 10 МБ"}, status_code=413)
+    name = file.filename or "img.png"
+    ext = Path(name).suffix.lower()
+    if ext not in vaultlib.IMG_EXT:
+        ext = {"image/png": ".png", "image/jpeg": ".jpg", "image/gif": ".gif",
+               "image/webp": ".webp", "image/svg+xml": ".svg"}.get(
+            (file.content_type or "").lower(), "")
+    if ext not in vaultlib.IMG_EXT:
+        return JSONResponse({"error": "поддерживаются png/jpg/gif/webp/svg"},
+                            status_code=400)
+    try:
+        doc_p = vaultlib.safe_path(doc)
+        slug = docx_io.slugify(doc_p.stem)
+        fname = f"{docx_io.slugify(Path(name).stem) or 'img'}-{secrets.token_hex(4)}{ext}"
+        doc_dir = doc_p.parent.relative_to(VAULT).as_posix()
+        rel_link = f"_assets/{slug}/{fname}"
+        target = vaultlib.safe_path(f"{doc_dir}/{rel_link}" if doc_dir else rel_link)
+        if not vaultlib.can_write(user, target):
+            return JSONResponse({"error": "сюда вам писать нельзя"}, status_code=403)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(data)
+    except vaultlib.VaultError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=403)
+    commit = await gitops.commit_paths(
+        [target], f"{user['login']}: картинка к {doc}", user["login"])
+    return {"ok": True, "rel": rel_link,
+            "path": target.relative_to(VAULT).as_posix(), "commit": commit}
+
+
 @app.get("/api/vault/resolve")
 async def api_vault_resolve(request: Request, name: str):
     path = vaultlib.resolve_wikilink(me(request), name)
@@ -1157,7 +1392,10 @@ def _index_html() -> str:
 
 @app.get("/")
 @app.get("/index.html")
-async def index_page():
+async def index_page(request: Request):
+    if (request.scope.get("state") or {}).get("user") is None:
+        return HTMLResponse((HERE / "web" / "present.html").read_text("utf-8"),
+                            headers={"Cache-Control": "no-cache"})
     return HTMLResponse(_index_html(),
                         headers={"Cache-Control": "no-cache"})
 

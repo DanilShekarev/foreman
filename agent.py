@@ -50,10 +50,14 @@ CHANNEL_CONTEXT_MESSAGES = 100
 
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit")
 FS_TOOLS = ("mcp__fs__copy_file", "mcp__fs__move_file", "mcp__fs__delete_file")
+KANBAN_TOOLS = ("mcp__kanban__list_cards", "mcp__kanban__create_card",
+                "mcp__kanban__move_card", "mcp__kanban__update_card",
+                "mcp__kanban__get_card", "mcp__kanban__comment_card",
+                "mcp__kanban__checklist_add", "mcp__kanban__checklist_set")
 # Deny-by-default: CLI-харнес объявляет агенту множество своих инструментов
 # (ToolSearch, Cron*, SendMessage, Task* и т.п.) — всё, чего нет в этом
 # белом списке, режется гардом до выполнения.
-SAFE_TOOLS = frozenset(WRITE_TOOLS) | set(FS_TOOLS) | {
+SAFE_TOOLS = frozenset(WRITE_TOOLS) | set(FS_TOOLS) | set(KANBAN_TOOLS) | {
     "Read", "Grep", "Glob", "TodoWrite"}
 
 
@@ -144,6 +148,285 @@ def _make_fs_server(scopes: dict, extra_read: set):
 
     return create_sdk_mcp_server(name="fs", version="1.0.0",
                                  tools=[copy_file, move_file, delete_file])
+
+
+def _make_kanban_server():
+    """Доска задач команды: агент видит и ведёт её наравне с людьми.
+    Одна общая доска, права не нужны — её видят все пользователи."""
+
+    def _ok(text: str) -> dict:
+        return {"content": [{"type": "text", "text": text}]}
+
+    def _err(text: str) -> dict:
+        return {"content": [{"type": "text", "text": text}], "is_error": True}
+
+    def _logins_to_ids(conn, raw: str) -> list[int]:
+        """'ivan, petya' -> [id, id]. Пустая строка — пустой список."""
+        ids = []
+        for login in [s.strip().lstrip("@") for s in (raw or "").split(",")]:
+            if not login:
+                continue
+            u = store.user_by_login(conn, login)
+            if u is None:
+                known = ", ".join(x["login"] for x in store.list_users(conn)
+                                  if not x["disabled_at"])
+                raise store.StoreError(
+                    f"нет пользователя «{login}» (есть: {known})")
+            ids.append(u["id"])
+        return ids
+
+    def _labels_to_ids(conn, raw: str) -> list[int]:
+        """'баг, UI' -> [id, id]; несуществующие метки создаются с автоцветом."""
+        ids = []
+        existing = {l["name"].lower(): l for l in store.kanban_labels_list(conn)}
+        for name in [s.strip() for s in (raw or "").split(",")]:
+            if not name:
+                continue
+            lab = existing.get(name.lower())
+            if lab is None:
+                lab = store.kanban_label_create(conn, name)
+                existing[lab["name"].lower()] = lab
+            ids.append(lab["id"])
+        return ids
+
+    def _fmt_card(c: dict) -> str:
+        who = ", ".join(a["login"] for a in c["assignees"]) or "никто"
+        line = f"  #{c['id']} {c['title']} — исполнители: {who}"
+        extra = []
+        if c.get("priority") and c["priority"] != "normal":
+            extra.append(f"приоритет {c['priority']}")
+        if c.get("due_date"):
+            extra.append(f"срок {c['due_date']}")
+        if c.get("labels"):
+            extra.append("метки: " + ", ".join(l["name"] for l in c["labels"]))
+        if c.get("checklist_total"):
+            extra.append(f"чеклист {c['checklist_done']}/{c['checklist_total']}")
+        if c.get("comments_count"):
+            extra.append(f"комментариев {c['comments_count']}")
+        if extra:
+            line += " · " + ", ".join(extra)
+        body = " ".join((c.get("body") or "").split())
+        if body:
+            line += f"\n      {body[:200]}{'…' if len(body) > 200 else ''}"
+        return line
+
+    @tool("list_cards", "Показать доску задач команды: все карточки по "
+          "колонкам (backlog=Планы, todo=К работе, doing=В работе, "
+          "done=Готово) с id, заголовком, описанием и исполнителями.", {})
+    async def list_cards(args):
+        conn = store.connect()
+        try:
+            data = store.kanban_list(conn)
+        finally:
+            conn.close()
+        by_col: dict[str, list[str]] = {}
+        for c in data["cards"]:
+            by_col.setdefault(c["column_key"], []).append(_fmt_card(c))
+        out = []
+        for col in data["columns"]:
+            lines = by_col.get(col["key"], [])
+            out.append(f"{col['title']} ({col['key']}) — {len(lines)}:")
+            out.extend(lines or ["  (пусто)"])
+        return _ok("\n".join(out))
+
+    @tool("create_card", "Завести задачу на доске. column: backlog|todo|"
+          "doing|done (по умолчанию todo — передай пустую строку). "
+          "assignees — логины исполнителей через запятую (можно пусто).",
+          {"title": str, "body": str, "column": str, "assignees": str})
+    async def create_card(args):
+        conn = store.connect()
+        try:
+            ids = _logins_to_ids(conn, args.get("assignees") or "")
+            card = store.kanban_create(
+                conn, args.get("title") or "",
+                body=args.get("body") or "",
+                column=(args.get("column") or "").strip() or "todo",
+                actor_name=store.AGENT_NAME, assignee_ids=ids)
+        except store.StoreError as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        return _ok(f"создана карточка #{card['id']} в колонке "
+                   f"{card['column_key']}")
+
+    @tool("move_card", "Перенести карточку в другую колонку: "
+          "backlog|todo|doing|done.", {"card_id": str, "column": str})
+    async def move_card(args):
+        conn = store.connect()
+        try:
+            card = store.kanban_update(
+                conn, int(args.get("card_id") or 0),
+                column=(args.get("column") or "").strip(),
+                actor_name=store.AGENT_NAME)
+        except (store.StoreError, ValueError) as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        return _ok(f"карточка #{card['id']} теперь в {card['column_key']}")
+
+    @tool("update_card", "Изменить карточку: заголовок, описание, "
+          "исполнителей (логины через запятую; «-» — снять всех), "
+          "priority (low|normal|high|urgent), due (ГГГГ-ММ-ДД; «-» — снять "
+          "срок), labels (имена меток через запятую, новые создаются сами; "
+          "«-» — снять все). Пустая строка в поле — не менять его.",
+          {"card_id": str, "title": str, "body": str, "assignees": str,
+           "priority": str, "due": str, "labels": str})
+    async def update_card(args):
+        conn = store.connect()
+        try:
+            kwargs = {"actor_name": store.AGENT_NAME}
+            if (args.get("title") or "").strip():
+                kwargs["title"] = args["title"]
+            if (args.get("body") or "").strip():
+                kwargs["body"] = args["body"]
+            raw = (args.get("assignees") or "").strip()
+            if raw == "-":
+                kwargs["assignee_ids"] = []
+            elif raw:
+                kwargs["assignee_ids"] = _logins_to_ids(conn, raw)
+            if (args.get("priority") or "").strip():
+                kwargs["priority"] = args["priority"].strip()
+            due = (args.get("due") or "").strip()
+            if due == "-":
+                kwargs["due_date"] = None
+            elif due:
+                kwargs["due_date"] = due
+            labs = (args.get("labels") or "").strip()
+            if labs == "-":
+                kwargs["label_ids"] = []
+            elif labs:
+                kwargs["label_ids"] = _labels_to_ids(conn, labs)
+            if len(kwargs) == 1:
+                return _err("нечего менять: все поля пустые")
+            card = store.kanban_update(conn, int(args.get("card_id") or 0),
+                                       **kwargs)
+        except (store.StoreError, ValueError) as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        who = ", ".join(a["login"] for a in card["assignees"]) or "никто"
+        return _ok(f"карточка #{card['id']} обновлена (исполнители: {who})")
+
+    _KIND_RU = {"create": "создание", "move": "перенос", "title": "заголовок",
+                "body": "описание", "assignees": "исполнители",
+                "labels": "метки", "priority": "приоритет", "due": "срок",
+                "checklist": "чеклист", "archive": "в архив",
+                "restore": "из архива"}
+
+    @tool("get_card", "Полная карточка по id: описание целиком, приоритет, "
+          "срок, метки, чеклист, комментарии и последние изменения. "
+          "Смотри карточку перед тем, как её менять.", {"card_id": str})
+    async def get_card(args):
+        conn = store.connect()
+        try:
+            card = store.kanban_card_full(conn, int(args.get("card_id") or 0))
+        except (store.StoreError, ValueError) as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        cols = dict(store.KANBAN_COLUMNS)
+        out = [f"#{card['id']} {card['title']}",
+               f"колонка: {cols.get(card['column_key'], card['column_key'])}"
+               f" · приоритет: {card['priority']}"
+               + (f" · срок: {card['due_date']}" if card["due_date"] else "")]
+        if card["labels"]:
+            out.append("метки: " + ", ".join(l["name"] for l in card["labels"]))
+        who = ", ".join(a["login"] for a in card["assignees"]) or "никто"
+        out.append(f"исполнители: {who}")
+        out.append(f"создал(а): {card['creator_name'] or 'агент'}"
+                   f" · {card['created_at'][:16]}")
+        if card["body"]:
+            out.append("\n" + card["body"])
+        if card["checklist"]:
+            out.append("\nЧеклист:")
+            for n, it in enumerate(card["checklist"], start=1):
+                out.append(f"  {n}. [{'x' if it['done'] else ' '}] {it['text']}")
+        if card["comments"]:
+            out.append("\nКомментарии:")
+            for c in card["comments"][-10:]:
+                out.append(f"  {c['author_name'] or 'агент'}"
+                           f" ({c['created_at'][:16]}): {c['text']}")
+        if card["activity"]:
+            out.append("\nПоследние изменения:")
+            for a in card["activity"][:10]:
+                what = _KIND_RU.get(a["kind"], a["kind"])
+                d = a["data"]
+                detail = (f" {d['from']} -> {d['to']}"
+                          if "from" in d or "to" in d else "")
+                out.append(f"  {a['actor_name'] or 'агент'}"
+                           f" ({a['created_at'][:16]}): {what}{detail}")
+        return _ok("\n".join(out))
+
+    @tool("comment_card", "Оставить комментарий к карточке — отмечай ход "
+          "работы и находки.", {"card_id": str, "text": str})
+    async def comment_card(args):
+        conn = store.connect()
+        try:
+            c = store.kanban_comment_add(
+                conn, int(args.get("card_id") or 0), args.get("text") or "",
+                author_name=store.AGENT_NAME)
+        except (store.StoreError, ValueError) as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        return _ok(f"комментарий к #{c['card_id']} добавлен")
+
+    @tool("checklist_add", "Добавить пункты чеклиста к карточке "
+          "(по одному на строку).", {"card_id": str, "items": str})
+    async def checklist_add(args):
+        lines = [s.strip() for s in (args.get("items") or "").splitlines()
+                 if s.strip()]
+        if not lines:
+            return _err("пустой список пунктов")
+        conn = store.connect()
+        try:
+            cid = int(args.get("card_id") or 0)
+            for line in lines:
+                store.kanban_check_add(conn, cid, line,
+                                       actor_name=store.AGENT_NAME)
+        except (store.StoreError, ValueError) as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        return _ok(f"добавлено пунктов: {len(lines)}")
+
+    @tool("checklist_set", "Отметить пункт чеклиста: item — номер (1, 2, …) "
+          "или кусок текста пункта; done — yes|no.",
+          {"card_id": str, "item": str, "done": str})
+    async def checklist_set(args):
+        conn = store.connect()
+        try:
+            card = store.kanban_card_full(conn, int(args.get("card_id") or 0))
+            items = card["checklist"]
+            key = (args.get("item") or "").strip()
+            found = None
+            if key.isdigit() and 1 <= int(key) <= len(items):
+                found = items[int(key) - 1]
+            else:
+                hits = [it for it in items
+                        if key.lower() in it["text"].lower()] if key else []
+                if len(hits) == 1:
+                    found = hits[0]
+                elif len(hits) > 1:
+                    return _err("несколько пунктов подходят: "
+                                + "; ".join(h["text"] for h in hits))
+            if found is None:
+                return _err("пункт не найден; чеклист: "
+                            + "; ".join(f"{n}. {it['text']}"
+                                        for n, it in enumerate(items, 1)))
+            done = (args.get("done") or "yes").strip().lower() not in (
+                "no", "false", "0", "нет")
+            store.kanban_check_set(conn, found["id"], done=done)
+        except (store.StoreError, ValueError) as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        return _ok(f"пункт «{found['text']}» -> {'сделан' if done else 'снят'}")
+
+    return create_sdk_mcp_server(name="kanban", version="1.0.0",
+                                 tools=[list_cards, create_card, move_card,
+                                        update_card, get_card, comment_card,
+                                        checklist_add, checklist_set])
 
 
 def _make_guards(scopes: dict, extra_read: set):
@@ -240,12 +523,13 @@ class AgentSession:
             cwd=str(VAULT / "shared"),
             add_dirs=add_dirs,
             allowed_tools=["Read", "Grep", "Glob", "Edit", "Write", "TodoWrite",
-                           *FS_TOOLS],
+                           *FS_TOOLS, *KANBAN_TOOLS],
             disallowed_tools=["Bash", "Task", "Agent", "WebSearch", "WebFetch",
                               "NotebookEdit", "ToolSearch", "SlashCommand"],
             permission_mode="acceptEdits",
             setting_sources=[],
-            mcp_servers={"fs": _make_fs_server(scopes, self.extra_read)},
+            mcp_servers={"fs": _make_fs_server(scopes, self.extra_read),
+                         "kanban": _make_kanban_server()},
             hooks={"PreToolUse": [
                 # matcher=None — на все инструменты; deny любого хука побеждает
                 HookMatcher(matcher=None, hooks=[whitelist_guard]),

@@ -598,7 +598,27 @@ const CHAT = (() => {
     const r = await fetch(`api/turn/${turnId}`);
     if (!r.ok) return;
     const turn = await r.json();
+    renderToolLines(div, turn.tools);
     renderTurnPlaque(div, turn);
+  }
+
+  // Строки «🔧 инструмент» при перерисовке ленты — из tools_json хода.
+  // Живой стрим рисует их сам по событиям — тогда они уже в div.
+  function renderToolLines(div, tools){
+    if (!tools || !tools.length || div.querySelector(".tool-line")) return;
+    const body = div.querySelector(".body");
+    if (!body) return;
+    for (const t of tools){
+      const el = document.createElement("div");
+      el.className = "tool-line";
+      el.textContent = `🔧 ${toolLabel(t.name)} ${shortToolInput(t.input)}`;
+      body.parentElement.insertBefore(el, body);
+    }
+  }
+
+  // mcp__fs__copy_file -> copy_file: префикс MCP-сервера в чате — шум.
+  function toolLabel(name){
+    return (name || "").replace(/^mcp__\w+?__/, "");
   }
 
   function renderTurnPlaque(div, turn){
@@ -698,7 +718,7 @@ const CHAT = (() => {
           } else if (ev.type === "tool" && agentMain){
             const t = document.createElement("div");
             t.className = "tool-line";
-            t.textContent = `🔧 ${ev.name} ${shortToolInput(ev.input)}`;
+            t.textContent = `🔧 ${toolLabel(ev.name)} ${shortToolInput(ev.input)}`;
             agentMain.insertBefore(t, agentBody);
           } else if (ev.type === "turn" && agentDiv){
             renderTurnPlaque(agentDiv, {id: ev.turn, files: ev.files || [],
@@ -740,6 +760,7 @@ const CHAT = (() => {
   function shortToolInput(input){
     try {
       const o = JSON.parse(input);
+      if (o.src) return o.dst ? `${o.src} → ${o.dst}` : o.src;
       return o.file_path || o.path || o.pattern || "";
     } catch { return ""; }
   }

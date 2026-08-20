@@ -66,6 +66,7 @@ const MD = (() => {
       if (m = line.match(/^(#{1,6})\s+(.*)/)){ closeList(); const n = Math.min(m[1].length, 3); html += `<h${n}>${mdInline(m[2], opt)}</h${n}>`; i++; continue; }
       if (/^\s*([-*_])\1{2,}\s*$/.test(line)){ closeList(); html += "<hr>"; i++; continue; }
       if (m = line.match(/^\s*>\s?(.*)/)){ closeList(); html += `<blockquote>${mdInline(m[1], opt)}</blockquote>`; i++; continue; }
+      if (m = line.match(/^\s*[-*+]\s+\[([ xX])\]\s+(.*)/)){ if (list !== "ul"){ closeList(); list = "ul"; html += "<ul>"; } html += `<li class="task"><input type="checkbox" disabled${m[1] === " " ? "" : " checked"}> ${mdInline(m[2], opt)}</li>`; i++; continue; }
       if (m = line.match(/^\s*[-*+]\s+(.*)/)){ if (list !== "ul"){ closeList(); list = "ul"; html += "<ul>"; } html += `<li>${mdInline(m[1], opt)}</li>`; i++; continue; }
       if (m = line.match(/^\s*\d+\.\s+(.*)/)){ if (list !== "ol"){ closeList(); list = "ol"; html += "<ol>"; } html += `<li>${mdInline(m[1], opt)}</li>`; i++; continue; }
       if (line.trim() === ""){ closeList(); i++; continue; }
@@ -75,5 +76,5 @@ const MD = (() => {
     return html;
   }
 
-  return { render, esc };
+  return { render, esc, resolveRel };
 })();

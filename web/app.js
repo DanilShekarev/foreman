@@ -10,6 +10,7 @@ const APP = (() => {
 
   let chats = [];
   let since = -1;
+  let vaultVersion = null;  // версия волта с сервера: сменилась — обновить дерево
 
   async function boot(){
     const meResp = await fetch("api/me");
@@ -35,6 +36,7 @@ const APP = (() => {
     }
     const init = await (await fetch("api/changes")).json();
     since = init.now;
+    vaultVersion = init.vault ?? null;
     pollLoop();
     updateNotifyBtn();
     // Список людей меняется редко — обновляем раз в минуту (новые регистрации
@@ -88,6 +90,12 @@ const APP = (() => {
       renderUsers();
       CHAT.showTyping(data.typing || []);
       CHAT.updateReads(data.reads || []);
+      // Кто-то (агент, коллега, загрузка) закоммитил в волт — дерево устарело.
+      if (data.vault !== undefined && data.vault !== vaultVersion){
+        if (vaultVersion !== null) VAULT.refreshTree();
+        vaultVersion = data.vault;
+      }
+      if (data.kanban !== undefined) KANBAN.onRev(data.kanban);
       if (data.events.length){
         refreshChats();
         CHAT.onChanges(data.events);
@@ -105,7 +113,7 @@ const APP = (() => {
     renderChatLists();
     // Бейдж непрочитанных в заголовке вкладки — работает и без HTTPS.
     const unread = chats.reduce((s, c) => s + (c.unread || 0), 0);
-    document.title = (unread ? `(${unread}) ` : "") + "GD-ассистент";
+    document.title = (unread ? `(${unread}) ` : "") + "Foreman";
     maybeNotify();
   }
 
@@ -216,6 +224,7 @@ const APP = (() => {
   function selectChat(id){
     const chat = chats.find(c => c.id === id);
     if (!chat) return;
+    KANBAN.close();  // доска — оверлей поверх чата
     localStorage.setItem("gd_last_chat", id);
     CHAT.open(chat);
     renderChatLists();

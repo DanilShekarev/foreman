@@ -83,6 +83,11 @@ def init_db(conn: sqlite3.Connection) -> None:
     rcols = {r[1] for r in conn.execute("PRAGMA table_info(chat_reads)")}
     if "read_at" not in rcols:
         conn.execute("ALTER TABLE chat_reads ADD COLUMN read_at TEXT")
+    kcols = {r[1] for r in conn.execute("PRAGMA table_info(kanban_cards)")}
+    for col, ddl in (("priority", "TEXT NOT NULL DEFAULT 'normal'"),
+                     ("due_date", "TEXT"), ("updated_by", "INTEGER")):
+        if col not in kcols:
+            conn.execute(f"ALTER TABLE kanban_cards ADD COLUMN {col} {ddl}")
 
 
 # --------------------------------------------------------------- пользователи
@@ -848,6 +853,452 @@ def changes_since(conn: sqlite3.Connection, user: dict, since: int,
         "   (m.user_id IS NOT NULL OR (c.kind = 'channel' AND c.is_private = 0))"
         " ORDER BY ch.id LIMIT ?", (user["id"], since, limit)).fetchall()
     return [dict(r) for r in rows]
+
+
+# --------------------------------------------------------------- канбан задач
+
+KANBAN_COLUMNS = (("backlog", "Планы"), ("todo", "К работе"),
+                  ("doing", "В работе"), ("done", "Готово"))
+_KANBAN_KEYS = {k for k, _ in KANBAN_COLUMNS}
+KANBAN_PRIORITIES = ("low", "normal", "high", "urgent")
+KANBAN_LABEL_COLORS = ("red", "orange", "yellow", "green", "teal",
+                       "blue", "purple", "pink", "gray")
+_UNSET = object()  # kwargs, где None — значащее значение («снять срок»)
+
+
+def _kanban_log(conn: sqlite3.Connection, card_id: int, kind: str, *,
+                actor_id: Optional[int] = None, actor_name: str = "",
+                data: Optional[dict] = None) -> None:
+    """Журнал карточки. Вызывается только внутри уже открытой write_tx."""
+    conn.execute(
+        f"INSERT INTO kanban_activity(card_id, actor_user_id, actor_name,"
+        f" kind, data_json, created_at) VALUES (?,?,?,?,?,{NOW_SQL})",
+        (card_id, actor_id, actor_name,
+         kind, json.dumps(data or {}, ensure_ascii=False)))
+
+
+def _kanban_bump(conn: sqlite3.Connection) -> None:
+    """Счётчик ревизии доски в meta: фронт поллит его и перерисовывает доску.
+    Вызывается только внутри уже открытой write_tx."""
+    conn.execute("INSERT INTO meta(key, value) VALUES ('kanban_rev', '1')"
+                 " ON CONFLICT(key) DO UPDATE SET"
+                 " value = CAST(value AS INTEGER) + 1")
+
+
+def kanban_rev(conn: sqlite3.Connection) -> int:
+    row = conn.execute("SELECT value FROM meta WHERE key = 'kanban_rev'").fetchone()
+    return int(row["value"]) if row else 0
+
+
+def _kanban_assignees(conn: sqlite3.Connection) -> dict[int, list[dict]]:
+    by_card: dict[int, list[dict]] = {}
+    for r in conn.execute(
+            "SELECT a.card_id, u.id AS user_id, u.login, u.display_name AS name"
+            " FROM kanban_assignees a JOIN users u ON u.id = a.user_id"
+            " ORDER BY u.display_name"):
+        by_card.setdefault(r["card_id"], []).append(
+            {"user_id": r["user_id"], "login": r["login"], "name": r["name"]})
+    return by_card
+
+
+def _kanban_card_labels(conn: sqlite3.Connection) -> dict[int, list[dict]]:
+    by_card: dict[int, list[dict]] = {}
+    for r in conn.execute(
+            "SELECT cl.card_id, l.id, l.name, l.color FROM kanban_card_labels cl"
+            " JOIN kanban_labels l ON l.id = cl.label_id ORDER BY l.name"):
+        by_card.setdefault(r["card_id"], []).append(
+            {"id": r["id"], "name": r["name"], "color": r["color"]})
+    return by_card
+
+
+def _kanban_counts(conn: sqlite3.Connection, cards: list[dict]) -> None:
+    checks = {r["card_id"]: (r["total"], r["done"]) for r in conn.execute(
+        "SELECT card_id, COUNT(*) AS total, COALESCE(SUM(done),0) AS done"
+        " FROM kanban_checklist GROUP BY card_id")}
+    comments = {r["card_id"]: r["n"] for r in conn.execute(
+        "SELECT card_id, COUNT(*) AS n FROM kanban_comments GROUP BY card_id")}
+    by_label = _kanban_card_labels(conn)
+    by_assign = _kanban_assignees(conn)
+    for c in cards:
+        total, done = checks.get(c["id"], (0, 0))
+        c["checklist_total"], c["checklist_done"] = total, int(done)
+        c["comments_count"] = comments.get(c["id"], 0)
+        c["labels"] = by_label.get(c["id"], [])
+        c["assignees"] = by_assign.get(c["id"], [])
+
+
+def kanban_list(conn: sqlite3.Connection) -> dict:
+    rows = conn.execute("SELECT * FROM kanban_cards WHERE archived_at IS NULL"
+                        " ORDER BY position, id").fetchall()
+    cards = [dict(r) for r in rows]
+    _kanban_counts(conn, cards)
+    return {"columns": [{"key": k, "title": t} for k, t in KANBAN_COLUMNS],
+            "cards": cards, "labels": kanban_labels_list(conn),
+            "rev": kanban_rev(conn)}
+
+
+def kanban_get(conn: sqlite3.Connection, card_id: int) -> dict:
+    row = conn.execute("SELECT * FROM kanban_cards WHERE id = ?",
+                       (card_id,)).fetchone()
+    if row is None:
+        raise NotFound("нет такой карточки")
+    card = dict(row)
+    _kanban_counts(conn, [card])
+    return card
+
+
+def kanban_card_full(conn: sqlite3.Connection, card_id: int) -> dict:
+    """Карточка для детальной панели: + чеклист, комментарии, активность."""
+    card = kanban_get(conn, card_id)
+    card["checklist"] = [dict(r) for r in conn.execute(
+        "SELECT id, text, done, position FROM kanban_checklist"
+        " WHERE card_id = ? ORDER BY position, id", (card_id,))]
+    card["comments"] = [dict(r) for r in conn.execute(
+        "SELECT id, author_user_id, author_name, text, created_at"
+        " FROM kanban_comments WHERE card_id = ? ORDER BY id", (card_id,))]
+    acts = [dict(r) for r in conn.execute(
+        "SELECT id, actor_user_id, actor_name, kind, data_json, created_at"
+        " FROM kanban_activity WHERE card_id = ?"
+        " ORDER BY id DESC LIMIT 100", (card_id,))]
+    for a in acts:
+        a["data"] = json.loads(a.pop("data_json") or "{}")
+    card["activity"] = acts
+    return card
+
+
+# ---- метки
+
+def kanban_labels_list(conn: sqlite3.Connection) -> list[dict]:
+    return [dict(r) for r in conn.execute(
+        "SELECT * FROM kanban_labels ORDER BY name")]
+
+
+def kanban_label_create(conn: sqlite3.Connection, name: str,
+                        color: str = "") -> dict:
+    name = " ".join(name.split())[:40]
+    if not name:
+        raise StoreError("пустое имя метки")
+    if color and color not in KANBAN_LABEL_COLORS:
+        raise StoreError(f"нет цвета «{color}» (есть: "
+                         f"{', '.join(KANBAN_LABEL_COLORS)})")
+    with write_tx(conn):
+        if not color:  # автоцвет: наименее занятый в палитре
+            used = [r["color"] for r in conn.execute(
+                "SELECT color FROM kanban_labels")]
+            color = min(KANBAN_LABEL_COLORS, key=used.count)
+        try:
+            cur = conn.execute("INSERT INTO kanban_labels(name, color)"
+                               " VALUES (?,?)", (name, color))
+        except sqlite3.IntegrityError:
+            raise StoreError(f"метка «{name}» уже есть") from None
+        _kanban_bump(conn)
+        return {"id": cur.lastrowid, "name": name, "color": color}
+
+
+def kanban_label_update(conn: sqlite3.Connection, label_id: int, *,
+                        name: Optional[str] = None,
+                        color: Optional[str] = None) -> dict:
+    with write_tx(conn):
+        row = conn.execute("SELECT * FROM kanban_labels WHERE id = ?",
+                           (label_id,)).fetchone()
+        if row is None:
+            raise NotFound("нет такой метки")
+        if name is not None:
+            name = " ".join(name.split())[:40]
+            if not name:
+                raise StoreError("пустое имя метки")
+            try:
+                conn.execute("UPDATE kanban_labels SET name = ? WHERE id = ?",
+                             (name, label_id))
+            except sqlite3.IntegrityError:
+                raise StoreError(f"метка «{name}» уже есть") from None
+        if color is not None:
+            if color not in KANBAN_LABEL_COLORS:
+                raise StoreError(f"нет цвета «{color}»")
+            conn.execute("UPDATE kanban_labels SET color = ? WHERE id = ?",
+                         (color, label_id))
+        _kanban_bump(conn)
+    return dict(conn.execute("SELECT * FROM kanban_labels WHERE id = ?",
+                             (label_id,)).fetchone())
+
+
+def kanban_label_delete(conn: sqlite3.Connection, label_id: int) -> None:
+    with write_tx(conn):
+        conn.execute("DELETE FROM kanban_card_labels WHERE label_id = ?",
+                     (label_id,))
+        n = conn.execute("DELETE FROM kanban_labels WHERE id = ?",
+                         (label_id,)).rowcount
+        if not n:
+            raise NotFound("нет такой метки")
+        _kanban_bump(conn)
+
+
+def _kanban_set_labels(conn: sqlite3.Connection, card_id: int,
+                       label_ids: list[int]) -> None:
+    conn.execute("DELETE FROM kanban_card_labels WHERE card_id = ?", (card_id,))
+    for lid in dict.fromkeys(label_ids):
+        try:
+            conn.execute("INSERT INTO kanban_card_labels(card_id, label_id)"
+                         " VALUES (?,?)", (card_id, lid))
+        except sqlite3.IntegrityError:
+            raise StoreError(f"нет метки с id {lid}") from None
+
+
+# ---- комментарии и чеклист
+
+def kanban_comment_add(conn: sqlite3.Connection, card_id: int, text: str, *,
+                       author_id: Optional[int] = None,
+                       author_name: str = "") -> dict:
+    text = text.strip()
+    if not text:
+        raise StoreError("пустой комментарий")
+    with write_tx(conn):
+        if conn.execute("SELECT 1 FROM kanban_cards WHERE id = ?",
+                        (card_id,)).fetchone() is None:
+            raise NotFound("нет такой карточки")
+        cur = conn.execute(
+            f"INSERT INTO kanban_comments(card_id, author_user_id, author_name,"
+            f" text, created_at) VALUES (?,?,?,?,{NOW_SQL})",
+            (card_id, author_id, author_name, text))
+        _kanban_bump(conn)
+        comment_id = cur.lastrowid
+    return dict(conn.execute("SELECT * FROM kanban_comments WHERE id = ?",
+                             (comment_id,)).fetchone())
+
+
+def kanban_check_add(conn: sqlite3.Connection, card_id: int, text: str, *,
+                     actor_id: Optional[int] = None,
+                     actor_name: str = "") -> dict:
+    text = " ".join(text.split())
+    if not text:
+        raise StoreError("пустой пункт")
+    with write_tx(conn):
+        if conn.execute("SELECT 1 FROM kanban_cards WHERE id = ?",
+                        (card_id,)).fetchone() is None:
+            raise NotFound("нет такой карточки")
+        pos = conn.execute(
+            "SELECT COALESCE(MAX(position), 0) + 1 AS p FROM kanban_checklist"
+            " WHERE card_id = ?", (card_id,)).fetchone()["p"]
+        cur = conn.execute(
+            f"INSERT INTO kanban_checklist(card_id, text, done, position,"
+            f" created_at) VALUES (?,?,0,?,{NOW_SQL})", (card_id, text, pos))
+        _kanban_log(conn, card_id, "checklist", actor_id=actor_id,
+                    actor_name=actor_name, data={"add": text[:80]})
+        _kanban_bump(conn)
+        item_id = cur.lastrowid
+    return dict(conn.execute("SELECT * FROM kanban_checklist WHERE id = ?",
+                             (item_id,)).fetchone())
+
+
+def kanban_check_set(conn: sqlite3.Connection, item_id: int, *,
+                     done: Optional[bool] = None,
+                     text: Optional[str] = None) -> dict:
+    """Тогглы галочек и правка текста пункта — без записи в журнал (шум)."""
+    with write_tx(conn):
+        row = conn.execute("SELECT * FROM kanban_checklist WHERE id = ?",
+                           (item_id,)).fetchone()
+        if row is None:
+            raise NotFound("нет такого пункта")
+        if done is not None:
+            conn.execute("UPDATE kanban_checklist SET done = ? WHERE id = ?",
+                         (1 if done else 0, item_id))
+        if text is not None:
+            t = " ".join(text.split())
+            if not t:
+                raise StoreError("пустой пункт")
+            conn.execute("UPDATE kanban_checklist SET text = ? WHERE id = ?",
+                         (t, item_id))
+        _kanban_bump(conn)
+    return dict(conn.execute("SELECT * FROM kanban_checklist WHERE id = ?",
+                             (item_id,)).fetchone())
+
+
+def kanban_check_delete(conn: sqlite3.Connection, item_id: int, *,
+                        actor_id: Optional[int] = None,
+                        actor_name: str = "") -> None:
+    with write_tx(conn):
+        row = conn.execute("SELECT * FROM kanban_checklist WHERE id = ?",
+                           (item_id,)).fetchone()
+        if row is None:
+            raise NotFound("нет такого пункта")
+        conn.execute("DELETE FROM kanban_checklist WHERE id = ?", (item_id,))
+        _kanban_log(conn, row["card_id"], "checklist", actor_id=actor_id,
+                    actor_name=actor_name, data={"del": row["text"][:80]})
+        _kanban_bump(conn)
+
+
+def _kanban_set_assignees(conn: sqlite3.Connection, card_id: int,
+                          user_ids: list[int]) -> None:
+    conn.execute("DELETE FROM kanban_assignees WHERE card_id = ?", (card_id,))
+    for uid in dict.fromkeys(user_ids):
+        try:
+            conn.execute("INSERT INTO kanban_assignees(card_id, user_id)"
+                         " VALUES (?,?)", (card_id, uid))
+        except sqlite3.IntegrityError:
+            raise StoreError(f"нет пользователя с id {uid}") from None
+
+
+def _kanban_next_pos(conn: sqlite3.Connection, column: str) -> float:
+    return conn.execute(
+        "SELECT COALESCE(MAX(position), 0) + 1 AS p FROM kanban_cards"
+        " WHERE column_key = ?", (column,)).fetchone()["p"]
+
+
+def _kanban_check_priority(priority: str) -> str:
+    if priority not in KANBAN_PRIORITIES:
+        raise StoreError(f"нет приоритета «{priority}» (есть: "
+                         f"{', '.join(KANBAN_PRIORITIES)})")
+    return priority
+
+
+def _kanban_check_due(due_date: Optional[str]) -> Optional[str]:
+    if due_date is None or due_date == "":
+        return None
+    if not re.fullmatch(r"\d{4}-\d{2}-\d{2}", due_date):
+        raise StoreError("срок — в формате ГГГГ-ММ-ДД")
+    return due_date
+
+
+def kanban_create(conn: sqlite3.Connection, title: str, *, body: str = "",
+                  column: str = "todo", actor_name: str = "",
+                  created_by: Optional[int] = None,
+                  assignee_ids: Optional[list[int]] = None,
+                  priority: str = "normal", due_date: Optional[str] = None,
+                  label_ids: Optional[list[int]] = None) -> dict:
+    title = " ".join(title.split())
+    if not title:
+        raise StoreError("пустой заголовок")
+    if column not in _KANBAN_KEYS:
+        raise StoreError(f"нет колонки «{column}» (есть: "
+                         f"{', '.join(k for k, _ in KANBAN_COLUMNS)})")
+    _kanban_check_priority(priority)
+    due_date = _kanban_check_due(due_date)
+    with write_tx(conn):
+        cur = conn.execute(
+            f"INSERT INTO kanban_cards(title, body, column_key, position,"
+            f" created_by, creator_name, created_at, updated_at,"
+            f" priority, due_date, updated_by)"
+            f" VALUES (?,?,?,?,?,?,{NOW_SQL},{NOW_SQL},?,?,?)",
+            (title[:200], body or "", column, _kanban_next_pos(conn, column),
+             created_by, actor_name, priority, due_date, created_by))
+        card_id = cur.lastrowid
+        _kanban_set_assignees(conn, card_id, assignee_ids or [])
+        if label_ids:
+            _kanban_set_labels(conn, card_id, label_ids)
+        _kanban_log(conn, card_id, "create", actor_id=created_by,
+                    actor_name=actor_name, data={"column": column})
+        _kanban_bump(conn)
+    return kanban_get(conn, card_id)
+
+
+def kanban_update(conn: sqlite3.Connection, card_id: int, *,
+                  title: Optional[str] = None, body: Optional[str] = None,
+                  column: Optional[str] = None,
+                  position: Optional[float] = None,
+                  assignee_ids: Optional[list[int]] = None,
+                  archived: Optional[bool] = None,
+                  priority: Optional[str] = None,
+                  due_date: Any = _UNSET,
+                  label_ids: Optional[list[int]] = None,
+                  actor_id: Optional[int] = None,
+                  actor_name: str = "") -> dict:
+    def log(kind: str, data: Optional[dict] = None) -> None:
+        _kanban_log(conn, card_id, kind, actor_id=actor_id,
+                    actor_name=actor_name, data=data)
+
+    with write_tx(conn):
+        row = conn.execute("SELECT * FROM kanban_cards WHERE id = ?",
+                           (card_id,)).fetchone()
+        if row is None:
+            raise NotFound("нет такой карточки")
+        sets: list[str] = []
+        vals: list[Any] = []
+        if title is not None:
+            t = " ".join(title.split())
+            if not t:
+                raise StoreError("пустой заголовок")
+            sets.append("title = ?")
+            vals.append(t[:200])
+            if t[:200] != row["title"]:
+                log("title", {"from": row["title"][:80], "to": t[:80]})
+        if body is not None:
+            sets.append("body = ?")
+            vals.append(body)
+            if body != row["body"]:
+                log("body")
+        if column is not None:
+            if column not in _KANBAN_KEYS:
+                raise StoreError(f"нет колонки «{column}» (есть: "
+                                 f"{', '.join(k for k, _ in KANBAN_COLUMNS)})")
+            sets.append("column_key = ?")
+            vals.append(column)
+            if column != row["column_key"]:
+                log("move", {"from": row["column_key"], "to": column})
+                if position is None:
+                    position = _kanban_next_pos(conn, column)  # в конец новой
+        if position is not None:
+            position = float(position)
+            # вырождение дробей: (prev+next)/2 слиплось с соседом —
+            # перенумеровать колонку и встать сразу после слипшегося
+            col = column or row["column_key"]
+            clash = conn.execute(
+                "SELECT 1 FROM kanban_cards WHERE column_key = ? AND id <> ?"
+                " AND ABS(position - ?) < 1e-9 LIMIT 1",
+                (col, card_id, position)).fetchone()
+            if clash:
+                others = conn.execute(
+                    "SELECT id, position FROM kanban_cards"
+                    " WHERE column_key = ? AND id <> ?"
+                    " ORDER BY position, id", (col, card_id)).fetchall()
+                pos_new = None
+                for n, r in enumerate(others, start=1):
+                    conn.execute("UPDATE kanban_cards SET position = ?"
+                                 " WHERE id = ?", (float(n), r["id"]))
+                    if pos_new is None and r["position"] >= position:
+                        pos_new = n + 0.5
+                position = pos_new if pos_new is not None else float(len(others) + 1)
+            sets.append("position = ?")
+            vals.append(position)
+        if priority is not None:
+            _kanban_check_priority(priority)
+            sets.append("priority = ?")
+            vals.append(priority)
+            if priority != row["priority"]:
+                log("priority", {"from": row["priority"], "to": priority})
+        if due_date is not _UNSET:
+            due = _kanban_check_due(due_date)
+            sets.append("due_date = ?")
+            vals.append(due)
+            if due != row["due_date"]:
+                log("due", {"from": row["due_date"], "to": due})
+        if archived is not None:
+            already = row["archived_at"] is not None
+            if archived != already:
+                log("archive" if archived else "restore")
+            sets.append(f"archived_at = {NOW_SQL}" if archived
+                        else "archived_at = NULL")
+        if sets:
+            sets.append(f"updated_at = {NOW_SQL}")
+            sets.append("updated_by = ?")
+            vals.append(actor_id)
+            conn.execute(f"UPDATE kanban_cards SET {', '.join(sets)}"
+                         f" WHERE id = ?", (*vals, card_id))
+        if assignee_ids is not None:
+            old = {r["user_id"] for r in conn.execute(
+                "SELECT user_id FROM kanban_assignees WHERE card_id = ?",
+                (card_id,))}
+            _kanban_set_assignees(conn, card_id, assignee_ids)
+            if set(assignee_ids) != old:
+                log("assignees")
+        if label_ids is not None:
+            old = {r["label_id"] for r in conn.execute(
+                "SELECT label_id FROM kanban_card_labels WHERE card_id = ?",
+                (card_id,))}
+            _kanban_set_labels(conn, card_id, label_ids)
+            if set(label_ids) != old:
+                log("labels")
+        _kanban_bump(conn)
+    return kanban_get(conn, card_id)
 
 
 # --------------------------------------------------------------- поиск

@@ -12,6 +12,93 @@ const VAULT = (() => {
 
   let currentPath = null, currentMtime = null, editing = false;
   let cm = null, cmHolder = null;   // CodeMirror; без vendor-файлов — textarea
+  let toast = null, toastHolder = null;  // Toast UI (WYSIWYG); каскад: Toast -> CM -> textarea
+  let loadedText = "";  // текст на момент открытия: сейв без изменений не коммитим
+
+  // Toast UI живёт от входа в правку до выхода: инстанс каждый раз новый,
+  // тема — классом на холдере (дарк-css матчит по .toastui-editor-dark сверху).
+  function syncToastTheme(){
+    if (toastHolder)
+      toastHolder.classList.toggle("toastui-editor-dark",
+        document.documentElement.dataset.theme !== "light");
+  }
+
+  async function uploadImage(blob, callback){
+    const fd = new FormData();
+    fd.append("file", blob, blob.name || "img.png");
+    const r = await fetch(`api/vault/upload_image?doc=${encodeURIComponent(currentPath)}`,
+                          {method: "POST", body: fd});
+    const data = await r.json().catch(() => ({error: "ошибка загрузки картинки"}));
+    if (data.error){ alert(data.error); return; }
+    callback(data.rel, blob.name || "");
+  }
+
+  function ensureToast(text){
+    if (!window.toastui || !toastui.Editor) return null;
+    if (!toastHolder){
+      toastHolder = document.createElement("div");
+      toastHolder.id = "toast-holder";
+      editEl.parentNode.insertBefore(toastHolder, editEl);
+      toastHolder.addEventListener("keydown", e => {
+        if (e.key === "s" && e.ctrlKey){ e.preventDefault(); save(); }
+      }, true);
+      new MutationObserver(syncToastTheme).observe(document.documentElement,
+        {attributes: true, attributeFilter: ["data-theme"]});
+    }
+    if (toast){ toast.destroy(); toast = null; }
+    toastHolder.style.display = "";
+    toast = new toastui.Editor({
+      el: toastHolder,
+      height: "100%",
+      initialEditType: "wysiwyg",
+      previewStyle: "tab",
+      initialValue: text,
+      language: "ru",
+      usageStatistics: false,
+      autofocus: true,
+      toolbarItems: [
+        ["heading", "bold", "italic", "strike"],
+        ["hr", "quote"],
+        ["ul", "ol", "task", "indent", "outdent"],
+        ["table", "image", "link"],
+        ["code", "codeblock"],
+      ],
+      hooks: {addImageBlobHook: uploadImage},
+      // Виджеты: [[вики]] и @упоминания становятся атомарными узлами и
+      // сериализуются обратно как есть — иначе ToastMark экранирует скобки.
+      widgetRules: [
+        {rule: /\[\[[^\[\]\n]+\]\]/,
+         toDOM(t){
+           const s = document.createElement("span");
+           s.className = "wikilink";
+           s.textContent = t.slice(2, -2);
+           return s;
+         }},
+        {rule: /@([a-zA-Z0-9_.-]+|агент)/,
+         toDOM(t){
+           const s = document.createElement("span");
+           s.className = "mention";
+           s.textContent = t;
+           return s;
+         }},
+      ],
+      customHTMLRenderer: {
+        image(node, ctx){
+          // В md остаётся относительный путь, показываем через резолв волта.
+          const out = ctx.origin();
+          out.attributes.src = MD.resolveRel(currentPath, node.destination);
+          return out;
+        },
+      },
+    });
+    syncToastTheme();
+    return toast;
+  }
+
+  function destroyToast(){
+    if (toast){ toast.destroy(); toast = null; }
+    if (toastHolder) toastHolder.style.display = "none";
+  }
 
   function ensureCM(){
     if (cm || !window.CodeMirror) return cm;
@@ -84,6 +171,7 @@ const VAULT = (() => {
     }
     showDocPane(path);
     currentMtime = data.mtime;
+    loadedText = data.text;
     viewEl.innerHTML = MD.render(data.text, {docPath: path});
     editEl.value = data.text;
     setEditing(false);
@@ -130,18 +218,21 @@ const VAULT = (() => {
     viewEl.style.display = on ? "none" : "";
     saveBtn.style.display = on ? "" : "none";
     editBtn.style.display = readonly ? "none" : (on ? "none" : "");
-    const rich = on && ensureCM();
-    editEl.style.display = on && !rich ? "" : "none";
+    const wys = on && !readonly && ensureToast(editEl.value);
+    if (!wys) destroyToast();
+    const rich = on && !wys && ensureCM();
+    editEl.style.display = on && !wys && !rich ? "" : "none";
     if (cmHolder) cmHolder.style.display = rich ? "" : "none";
     if (rich){
       cm.setValue(editEl.value);
       setTimeout(() => { cm.refresh(); cm.focus(); }, 0);
-    } else if (on){
+    } else if (on && !wys){
       editEl.focus();
     }
   }
 
   function editorText(){
+    if (toast) return toast.getMarkdown();
     return (cm && cmHolder && cmHolder.style.display !== "none")
       ? cm.getValue() : editEl.value;
   }
@@ -150,6 +241,7 @@ const VAULT = (() => {
     if (!currentPath || !editing) return;
     const text = editorText();
     editEl.value = text;
+    if (text === loadedText){ setEditing(false); return; }
     const r = await fetch("api/vault/file", {
       method: "PUT", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({path: currentPath, text,
@@ -161,6 +253,7 @@ const VAULT = (() => {
       return;
     }
     currentMtime = data.mtime;
+    loadedText = editEl.value;
     viewEl.innerHTML = MD.render(editEl.value, {docPath: currentPath});
     bindWikilinks(viewEl);
     setEditing(false);

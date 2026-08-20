@@ -129,6 +129,82 @@ CREATE TABLE IF NOT EXISTS invites (
     used_at         TEXT
 );
 
+-- Канбан задач команды (одна общая доска). Колонки фиксированы:
+-- backlog «Планы» / todo «К работе» / doing «В работе» / done «Готово».
+-- position — REAL: перетаскивание вставляет карточку между соседями как
+-- (prev+next)/2 без перенумерации всей колонки.
+CREATE TABLE IF NOT EXISTS kanban_cards (
+    id           INTEGER PRIMARY KEY,
+    title        TEXT NOT NULL,
+    body         TEXT NOT NULL DEFAULT '',
+    column_key   TEXT NOT NULL DEFAULT 'todo'
+                 CHECK (column_key IN ('backlog','todo','doing','done')),
+    position     REAL NOT NULL DEFAULT 0,
+    created_by   INTEGER REFERENCES users(id),  -- NULL = агент
+    creator_name TEXT NOT NULL DEFAULT '',
+    created_at   TEXT NOT NULL,
+    updated_at   TEXT NOT NULL,
+    archived_at  TEXT,
+    -- поля ниже дублируются ALTER-миграцией в init_db (живые БД);
+    -- CHECK на них не вешать — ALTER ADD COLUMN его не умеет
+    priority     TEXT NOT NULL DEFAULT 'normal',  -- low|normal|high|urgent
+    due_date     TEXT,                            -- YYYY-MM-DD
+    updated_by   INTEGER                          -- NULL = агент
+);
+
+CREATE TABLE IF NOT EXISTS kanban_assignees (
+    card_id INTEGER NOT NULL REFERENCES kanban_cards(id),
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    PRIMARY KEY (card_id, user_id)
+);
+
+-- color — ключ палитры (--lab-* в style.css), не hex: темизация на фронте.
+CREATE TABLE IF NOT EXISTS kanban_labels (
+    id    INTEGER PRIMARY KEY,
+    name  TEXT NOT NULL UNIQUE,
+    color TEXT NOT NULL DEFAULT 'blue'
+);
+
+CREATE TABLE IF NOT EXISTS kanban_card_labels (
+    card_id  INTEGER NOT NULL REFERENCES kanban_cards(id),
+    label_id INTEGER NOT NULL REFERENCES kanban_labels(id),
+    PRIMARY KEY (card_id, label_id)
+);
+
+CREATE TABLE IF NOT EXISTS kanban_checklist (
+    id         INTEGER PRIMARY KEY,
+    card_id    INTEGER NOT NULL REFERENCES kanban_cards(id),
+    text       TEXT NOT NULL,
+    done       INTEGER NOT NULL DEFAULT 0,
+    position   REAL NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS kanban_comments (
+    id             INTEGER PRIMARY KEY,
+    card_id        INTEGER NOT NULL REFERENCES kanban_cards(id),
+    author_user_id INTEGER REFERENCES users(id),  -- NULL = агент
+    author_name    TEXT NOT NULL,
+    text           TEXT NOT NULL,
+    created_at     TEXT NOT NULL
+);
+
+-- Журнал изменений карточки: kind + детали в data_json
+-- ({"from":"todo","to":"doing"} и т.п.), формат строк собирает фронт.
+CREATE TABLE IF NOT EXISTS kanban_activity (
+    id            INTEGER PRIMARY KEY,
+    card_id       INTEGER NOT NULL REFERENCES kanban_cards(id),
+    actor_user_id INTEGER,  -- NULL = агент
+    actor_name    TEXT NOT NULL,
+    kind          TEXT NOT NULL,
+    data_json     TEXT NOT NULL DEFAULT '{}',
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_kb_checklist_card ON kanban_checklist(card_id, id);
+CREATE INDEX IF NOT EXISTS idx_kb_comments_card  ON kanban_comments(card_id, id);
+CREATE INDEX IF NOT EXISTS idx_kb_activity_card  ON kanban_activity(card_id, id);
+
 CREATE TABLE IF NOT EXISTS uploads (
     id         INTEGER PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id),

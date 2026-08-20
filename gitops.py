@@ -14,6 +14,17 @@ from vaultlib import VAULT
 
 _lock = asyncio.Lock()
 
+# Версия волта: растёт на каждом коммите (ход агента, правка в редакторе,
+# загрузка, откат). Фронт видит её в /api/changes и обновляет дерево без
+# перезагрузки страницы. Сброс при рестарте безвреден: клиент заметит смену
+# значения и просто перечитает дерево лишний раз.
+VERSION = 0
+
+
+def _bump() -> None:
+    global VERSION
+    VERSION += 1
+
 _GIT_ENV = {
     **os.environ,
     # Не подцеплять глобальные хуки/конфиги пользователя.
@@ -75,6 +86,7 @@ async def commit_paths(paths: list[Path], message: str, author: str) -> str | No
             return None
         await _git("commit", "-m", message[:200],
                    f"--author={author} <{author.split()[0]}@gd-assist>")
+        _bump()
         return (await _git("rev-parse", "HEAD")).strip()
 
 
@@ -99,6 +111,7 @@ async def revert(commit_hash: str, author: str) -> str:
         except GitError:
             await _git("revert", "--abort", check=False)
             raise
+        _bump()
         return (await _git("rev-parse", "HEAD")).strip()
 
 
