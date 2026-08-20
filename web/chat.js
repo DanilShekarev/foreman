@@ -40,6 +40,7 @@ const CHAT = (() => {
     showTyping([]);
     clearReply();
     chatReads = [];
+    lastMsgId = 0;  // id глобальные: без сброса чужой чат дал бы ложный «блип»
     await refetch(true);
   }
 
@@ -96,11 +97,32 @@ const CHAT = (() => {
       APP.refreshChats();
     }
     if (stick) scrollBottom(messagesEl);
+    const prevLast = lastMsgId;
     if (data.messages.length){
       lastMsgId = data.messages[data.messages.length - 1].id;
-      markRead();
+      // Фоновая вкладка не помечает прочитанным: пользователь не видел
+      // сообщений (галочки честные), а рост непрочитанных — триггер звука
+      // и нотификации. Отметим при возврате во вкладку (visibilitychange).
+      if (!document.hidden) markRead();
+    }
+    // Звук входящих в ОТКРЫТОМ чате — по самим сообщениям, детерминированно
+    // (другие чаты озвучивает maybeNotify по росту непрочитанных).
+    if (prevLast){
+      const fresh = data.messages.filter(m => m.id > prevLast &&
+        !m.deleted_at && m.author_kind === "user" &&
+        window.ME && m.author_user_id !== window.ME.id);
+      if (fresh.length){
+        const mentioned = fresh.some(m =>
+          new RegExp(`@${window.ME.login}\\b`, "i").test(m.text || ""));
+        if (mentioned) SOUND.mention();
+        else SOUND.msg();
+      }
     }
   }
+
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && lastMsgId) markRead();
+  });
 
   function updatePinBtn(n){
     document.getElementById("pin-count").textContent = n ? " " + n : "";

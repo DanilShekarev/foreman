@@ -18,11 +18,17 @@ const SOUND = (() => {
     return ctx.state === "running" ? ctx : null;
   }
 
-  // Разблокировка контекста первым жестом пользователя — дальше звучат и
-  // события из поллинга (входящие без единого клика по странице).
+  // Разблокировка первым жестом пользователя: контекст СОЗДАЁТСЯ прямо в
+  // обработчике жеста (тогда он сразу running) — иначе первый входящий звук
+  // создавал бы его вне жеста, заставал suspended и молча глотался.
   ["pointerdown", "keydown"].forEach(ev =>
     document.addEventListener(ev, () => {
-      if (enabled && ctx && ctx.state === "suspended") ctx.resume();
+      if (!enabled) return;
+      if (!ctx){
+        try { ctx = new (window.AudioContext || window.webkitAudioContext)(); }
+        catch (e) { return; }
+      }
+      if (ctx.state === "suspended") ctx.resume();
     }, {capture: true}));
 
   function tone(freq, {type = "sine", at = 0, dur = 0.15, v = 1,

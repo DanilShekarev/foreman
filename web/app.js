@@ -161,8 +161,9 @@ const APP = (() => {
       for (const c of chats){
         const grew = (c.unread || 0) > (prevUnread[c.id] || 0);
         if (!grew) continue;
-        // Не дёргаем, если чат открыт прямо сейчас во вкладке в фокусе.
-        if (!document.hidden && CHAT.currentId() === c.id) continue;
+        // Открытый чат озвучивает CHAT.refetch по самим сообщениям (счётчик
+        // непрочитанных для него гоняется с markRead) — здесь только другие.
+        if (CHAT.currentId() === c.id) continue;
         sound = c.mentioned ? "mention" : (sound || "msg");
         if (!notifyEnabled()) continue;
         const icon = c.kind === "agent" ? "🤖" : c.kind === "dm" ? "✉️" : "#";
