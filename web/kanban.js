@@ -190,6 +190,8 @@ const KANBAN = (() => {
     view.style.display = "none";
     localStorage.removeItem("gd_kb_open");
     syncNav(false);
+    // Чат под доской снова виден — теперь его можно пометить прочитанным.
+    if (typeof CHAT !== "undefined" && CHAT.markVisible) CHAT.markVisible();
   }
 
   async function refresh(){

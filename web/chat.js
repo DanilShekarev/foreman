@@ -100,10 +100,11 @@ const CHAT = (() => {
     const prevLast = lastMsgId;
     if (data.messages.length){
       lastMsgId = data.messages[data.messages.length - 1].id;
-      // Фоновая вкладка не помечает прочитанным: пользователь не видел
-      // сообщений (галочки честные), а рост непрочитанных — триггер звука
-      // и нотификации. Отметим при возврате во вкладку (visibilitychange).
-      if (!document.hidden) markRead();
+      // Фоновая вкладка или открытая доска задач не помечают прочитанным:
+      // пользователь не видел сообщений (галочки честные), а рост
+      // непрочитанных — триггер звука и нотификации. Отметка — при возврате
+      // (visibilitychange / закрытие доски).
+      if (chatVisible()) markRead();
     }
     // Звук входящих в ОТКРЫТОМ чате — по самим сообщениям, детерминированно
     // (другие чаты озвучивает maybeNotify по росту непрочитанных).
@@ -121,7 +122,7 @@ const CHAT = (() => {
   }
 
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && lastMsgId) markRead();
+    if (chatVisible() && lastMsgId) markRead();
   });
 
   function updatePinBtn(n){
@@ -144,6 +145,13 @@ const CHAT = (() => {
         if (gap < img.offsetHeight + 160) el.scrollTop = el.scrollHeight;
       }, {once: true});
     });
+  }
+
+  // Чат реально виден пользователю: вкладка не скрыта и лента не перекрыта
+  // доской задач (доска — оверлей, current под ней остаётся).
+  function chatVisible(){
+    return !document.hidden &&
+           !(typeof KANBAN !== "undefined" && KANBAN.isOpen());
   }
 
   function markRead(){
@@ -1202,5 +1210,7 @@ const CHAT = (() => {
   }
 
   return { open, onChanges, showTyping, updateReads,
+           // Зов снаружи (закрытие доски задач): чат снова виден — прочитан.
+           markVisible: () => { if (lastMsgId && chatVisible()) markRead(); },
            currentId: () => current && current.id };
 })();
