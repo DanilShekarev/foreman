@@ -463,7 +463,10 @@ def list_chats(conn: sqlite3.Connection, user: dict) -> list[dict]:
             "  SELECT 1 FROM mentions mn WHERE mn.message_id = messages.id"
             "  AND mn.user_id = ?)) AS mentioned"
             " FROM messages WHERE chat_id = ? AND id > ? AND thread_root_id IS NULL"
-            " AND NOT (author_kind = 'user' AND author_user_id = ?)",
+            " AND NOT (author_kind = 'user' AND author_user_id = ?)"
+            # Стримящийся ответ агента ещё «не доставлен» — иначе весь ход
+            # висел бы ложный бейдж непрочитанного у смотрящего на стрим.
+            " AND status != 'streaming'",
             (user["id"], chat["id"], chat["last_read"], user["id"])).fetchone()
         chat["unread"] = unread["n"]
         chat["mentioned"] = bool(unread["mentioned"])
@@ -799,6 +802,21 @@ def get_turn(conn: sqlite3.Connection, turn_id: int) -> dict:
     turn["files"] = json.loads(turn.pop("files_json") or "[]")
     turn["tools"] = json.loads(turn.pop("tools_json") or "[]")
     return turn
+
+
+def update_turn_tools(conn: sqlite3.Connection, turn_id: int,
+                      tools: list[dict], agent_msg_id: int) -> None:
+    """Живое обновление tools_json по ходу дела: страница, перезагруженная
+    посреди хода (и наблюдатели), видит строки 🔧 сразу, а не после finish_turn.
+    Событие message_upd будит их поллинг."""
+    with write_tx(conn):
+        row = conn.execute("SELECT chat_id FROM agent_turns WHERE id = ?",
+                           (turn_id,)).fetchone()
+        if row is None:
+            return
+        conn.execute("UPDATE agent_turns SET tools_json = ? WHERE id = ?",
+                     (json.dumps(tools, ensure_ascii=False), turn_id))
+        _add_change(conn, row["chat_id"], "message_upd", agent_msg_id)
 
 
 def finish_turn(conn: sqlite3.Connection, turn_id: int, *, status: str,

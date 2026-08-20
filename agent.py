@@ -727,6 +727,15 @@ class SessionManager:
                                      "input": _short_input(block.input)}
                             tools.append(entry)
                             await job.emit("tool", **entry)
+                            # В БД сразу: перезагруженная посреди хода
+                            # страница и наблюдатели видят 🔧 живьём.
+                            conn = store.connect()
+                            try:
+                                store.update_turn_tools(
+                                    conn, job.turn_id, tools,
+                                    job.agent_msg_id)
+                            finally:
+                                conn.close()
                             keys: tuple[str, ...] = ()
                             if block.name in WRITE_TOOLS:
                                 keys = ("file_path", "path")

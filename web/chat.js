@@ -41,6 +41,8 @@ const CHAT = (() => {
     clearReply();
     chatReads = [];
     lastMsgId = 0;  // id глобальные: без сброса чужой чат дал бы ложный «блип»
+    histLimit = 60;
+    histEnd = false;
     await refetch(true);
   }
 
@@ -77,9 +79,10 @@ const CHAT = (() => {
 
   async function refetch(scroll = false){
     if (!current) return;
-    const r = await fetch(`api/chats/${current.id}/messages`);
+    const r = await fetch(`api/chats/${current.id}/messages?limit=${histLimit}`);
     if (!r.ok) { messagesEl.innerHTML = "<div class='msg system'>нет доступа</div>"; return; }
     const data = await r.json();
+    histEnd = data.messages.length < histLimit;  // старее уже ничего нет
     chatReads = data.reads || [];
     const stick = scroll || nearBottom(messagesEl);
     messagesEl.innerHTML = "";
@@ -128,6 +131,28 @@ const CHAT = (() => {
   function updatePinBtn(n){
     document.getElementById("pin-count").textContent = n ? " " + n : "";
   }
+
+  // ------------------------------------------------- подгрузка истории
+
+  // Лента держит «окно» последних histLimit сообщений; у верха окно растёт
+  // и лента перерисовывается целиком с восстановлением позиции — так реакции
+  // и правки старых сообщений остаются живыми, а логика refetch — одна.
+  let histLimit = 60, histEnd = false, histLoading = false;
+
+  messagesEl.addEventListener("scroll", async () => {
+    if (messagesEl.scrollTop > 150 || histLoading || histEnd ||
+        !current || streaming) return;
+    histLoading = true;
+    const prevH = messagesEl.scrollHeight, prevTop = messagesEl.scrollTop;
+    histLimit = Math.min(histLimit + 120, 1000);
+    try {
+      await refetch();
+      messagesEl.scrollTop = messagesEl.scrollHeight - prevH + prevTop;
+      if (histLimit >= 1000) histEnd = true;  // дальше окно не растёт
+    } finally {
+      histLoading = false;
+    }
+  });
 
   function nearBottom(el){
     return el.scrollHeight - el.scrollTop - el.clientHeight < 120;
@@ -657,12 +682,22 @@ const CHAT = (() => {
     if (!tools || !tools.length || div.querySelector(".tool-line")) return;
     const body = div.querySelector(".body");
     if (!body) return;
-    for (const t of tools){
-      const el = document.createElement("div");
-      el.className = "tool-line";
-      el.textContent = `🔧 ${toolLabel(t.name)} ${shortToolInput(t.input)}`;
-      body.parentElement.insertBefore(el, body);
-    }
+    for (const t of tools)
+      body.parentElement.insertBefore(makeToolLine(t.name, t.input), body);
+  }
+
+  function makeToolLine(name, input){
+    const el = document.createElement("div");
+    el.className = "tool-line";
+    const arg = shortToolInput(input);
+    el.textContent = `🔧 ${toolLabel(name)} ${midTrim(arg)}`;
+    if (arg.length > 46) el.title = arg;  // полный путь — по ховеру
+    return el;
+  }
+
+  // Длинные пути режем ПОСЕРЕДИНЕ: хвост с именем файла — самое важное.
+  function midTrim(s, max = 46){
+    return s.length <= max ? s : s.slice(0, 16) + "…" + s.slice(-(max - 17));
   }
 
   // mcp__fs__copy_file -> copy_file: префикс MCP-сервера в чате — шум.
@@ -767,10 +802,7 @@ const CHAT = (() => {
             agentBody.innerHTML = MD.render(agentText);
             if (nearBottom(container)) container.scrollTop = container.scrollHeight;
           } else if (ev.type === "tool" && agentMain){
-            const t = document.createElement("div");
-            t.className = "tool-line";
-            t.textContent = `🔧 ${toolLabel(ev.name)} ${shortToolInput(ev.input)}`;
-            agentMain.insertBefore(t, agentBody);
+            agentMain.insertBefore(makeToolLine(ev.name, ev.input), agentBody);
           } else if (ev.type === "turn" && agentDiv){
             renderTurnPlaque(agentDiv, {id: ev.turn, files: ev.files || [],
                                         commit_hash: ev.commit, status: "done"});

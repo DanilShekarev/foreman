@@ -465,8 +465,10 @@ async def api_messages(chat_id: int, request: Request, before: int | None = None
     conn = store.connect()
     try:
         chat = store.require_chat(conn, chat_id, me(request))
+        # Потолок 1000: фронт подгружает историю расширением окна выборки
+        # (limit растёт по мере скролла вверх, лента рисуется целиком).
         msgs = store.list_messages(conn, chat_id, before=before,
-                                   limit=min(limit, 200), thread_root_id=thread)
+                                   limit=min(limit, 1000), thread_root_id=thread)
         members = store.chat_member_ids(conn, chat_id)
         return {"chat": chat, "messages": msgs, "member_ids": members,
                 "agent": manager.status(chat_id),

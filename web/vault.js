@@ -234,6 +234,8 @@ const VAULT = (() => {
     docEl.style.display = "none";
     backBtn.style.display = "none";
     currentPath = null;
+    // Иначе перезагрузка страницы «вернёт» закрытый документ.
+    localStorage.removeItem("gd_last_doc");
   }
 
   function setEditing(on, readonly = false){
