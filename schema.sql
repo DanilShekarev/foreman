@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS chats (
     is_private    INTEGER NOT NULL DEFAULT 0,
     owner_user_id INTEGER REFERENCES users(id),
     created_at    TEXT NOT NULL,
-    archived_at   TEXT
+    archived_at   TEXT,
+    model         TEXT   -- модель агента этого чата; NULL = дефолт сервера
 );
 
 CREATE TABLE IF NOT EXISTS chat_members (
@@ -99,6 +100,7 @@ CREATE TABLE IF NOT EXISTS agent_turns (
     tools_json      TEXT NOT NULL DEFAULT '[]',  -- [{name, input}] для отображения в чате
     commit_hash     TEXT,
     error           TEXT,
+    model           TEXT,   -- фактическая модель хода (из init-сообщения SDK)
     started_at      TEXT NOT NULL,
     finished_at     TEXT
 );

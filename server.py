@@ -28,7 +28,7 @@ import gitops
 import prompts
 import store
 import vaultlib
-from agent import manager
+from agent import MODEL, MODELS, manager
 from vaultlib import VAULT
 
 HERE = Path(__file__).resolve().parent
@@ -320,7 +320,8 @@ def _err(exc: Exception, code: int = 400) -> JSONResponse:
 async def api_me(request: Request):
     u = me(request)
     return {"id": u["id"], "login": u["login"], "display_name": u["display_name"],
-            "is_admin": bool(u["is_admin"])}
+            "is_admin": bool(u["is_admin"]),
+            "models": list(MODELS), "model_default": MODEL}
 
 
 @app.get("/api/users")
@@ -433,6 +434,27 @@ async def api_delete_chat(chat_id: int, request: Request):
         except OSError:
             pass
     return {"ok": True}
+
+
+@app.post("/api/chats/{chat_id}/model")
+async def api_chat_model(chat_id: int, request: Request):
+    """Модель агента этого чата. Применяется со следующего хода: сессия
+    переподключается с resume, контекст не теряется."""
+    body = await request.json()
+    model = (body.get("model") or "").strip()
+    if model and model not in MODELS:
+        return JSONResponse(
+            {"error": f"нет модели «{model}» (есть: {', '.join(MODELS)})"},
+            status_code=400)
+    conn = store.connect()
+    try:
+        store.require_chat(conn, chat_id, me(request))
+        store.set_chat_model(conn, chat_id, model)
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    return {"ok": True, "model": model or None}
 
 
 @app.post("/api/chats/{chat_id}/join")

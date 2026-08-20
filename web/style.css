@@ -811,3 +811,11 @@ body.kb-dragging{cursor:grabbing;user-select:none}
 .kb-lab-new{margin-top:14px;border-top:1px solid var(--border);padding-top:12px}
 /* пункт «Задачи» в сайдбаре — вне секций */
 .nav-extra{margin:4px 8px 2px}
+
+/* селектор модели агента в шапке чата */
+#model-select{background:var(--bg2);color:var(--fg-dim);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:3px 7px;font:inherit;font-size:12px;
+  cursor:pointer}
+#model-select:hover{border-color:var(--border-strong);color:var(--fg)}
+.turn-model{color:var(--fg-faint);font-size:10px;border:1px solid var(--border);
+  border-radius:8px;padding:0 6px;line-height:1.5}

@@ -24,6 +24,7 @@ from claude_agent_sdk import (
     ClaudeSDKClient,
     HookMatcher,
     ResultMessage,
+    SystemMessage,
     TextBlock,
     ToolUseBlock,
     create_sdk_mcp_server,
@@ -40,6 +41,10 @@ from vaultlib import VAULT
 import os
 
 MODEL = os.environ.get("GD_MODEL", "sonnet")
+# Модели, доступные к выбору per-чат (селектор в шапке чата).
+MODELS = tuple(m.strip() for m in
+               os.environ.get("GD_MODELS", "sonnet,opus,haiku").split(",")
+               if m.strip())
 MAX_TURNS = int(os.environ.get("GD_MAX_TURNS", "100"))
 IDLE_SECONDS = 30 * 60          # закрыть молчащий клиент (resume вернёт контекст)
 MAX_CONCURRENT_TURNS = 3        # глобальный предел одновременных ходов
@@ -503,6 +508,7 @@ class AgentSession:
         self.owner_login = owner_login
         self.system_prompt = system_prompt
         self.client: Optional[ClaudeSDKClient] = None
+        self.model_in_use: Optional[str] = None  # модель живого клиента
         self.queue: asyncio.Queue[TurnJob] = asyncio.Queue()
         self.worker: Optional[asyncio.Task] = None
         self.last_used = time.monotonic()
@@ -511,15 +517,20 @@ class AgentSession:
         # submit(), замыкание гарда видит пополнения без переподключения.
         self.extra_read: set[Path] = set()
 
-    def _options(self, resume: Optional[str]) -> ClaudeAgentOptions:
+    def _options(self, resume: Optional[str],
+                 model: str) -> ClaudeAgentOptions:
         scopes = vaultlib.agent_scopes(self.chat_kind, self.owner_login)
         write_guard, read_guard = _make_guards(scopes, self.extra_read)
         add_dirs = [str(vaultlib.unity_root())]  # зеркало main, не рабочая копия
         if self.chat_kind == "agent" and self.owner_login:
             add_dirs.append(str(VAULT / "personal" / self.owner_login))
         return ClaudeAgentOptions(
-            system_prompt=self.system_prompt,
-            model=MODEL,
+            # Модель не знает своего имени сама (его нет ни в весах, ни в
+            # среде) — сообщаем, иначе на «кто ты» она отвечает наугад.
+            system_prompt=(self.system_prompt +
+                           f"\n\nТехническая справка: ты работаешь на модели"
+                           f" Claude «{model}»."),
+            model=model,
             cwd=str(VAULT / "shared"),
             add_dirs=add_dirs,
             allowed_tools=["Read", "Grep", "Glob", "Edit", "Write", "TodoWrite",
@@ -543,10 +554,12 @@ class AgentSession:
             resume=resume,
         )
 
-    async def connect(self, resume: Optional[str]) -> None:
+    async def connect(self, resume: Optional[str], model: str) -> None:
         print(setup_auth())
-        self.client = ClaudeSDKClient(self._options(resume))
+        print(f"[agent] чат {self.chat_id}: подключение, модель={model}")
+        self.client = ClaudeSDKClient(self._options(resume, model))
         await self.client.connect()
+        self.model_in_use = model
 
     async def disconnect(self) -> None:
         if self.client is not None:
@@ -682,24 +695,29 @@ class SessionManager:
         conn = store.connect()
         try:
             resume = store.stored_sdk_session(conn, s.chat_id)
+            model = store.get_chat(conn, s.chat_id).get("model") or MODEL
         finally:
             conn.close()
 
+        # Модель чата сменили — переподключаемся; resume вернёт контекст.
+        if s.client is not None and s.model_in_use != model:
+            await s.disconnect()
         if s.client is None:
             try:
-                await s.connect(resume)
+                await s.connect(resume, model)
             except Exception:
                 if resume is None:
                     raise
                 # Сохранённая SDK-сессия могла пропасть (чистка ~/.claude) —
                 # одна попытка без resume.
-                await s.connect(None)
+                await s.connect(None, model)
 
         text_parts: list[str] = []
         tools: list[dict] = []
         touched: list[Path] = []
         sdk_session_id: Optional[str] = None
         cost_usd: Optional[float] = None
+        real_model: Optional[str] = None  # из init-сообщения SDK, ground truth
         last_db_push = 0.0
 
         async def push_db(status: str = "streaming") -> None:
@@ -755,6 +773,11 @@ class SessionManager:
                                 touched.append(p)
                                 if block.name in WRITE_TOOLS:
                                     break  # file_path ИЛИ path — один файл
+                elif isinstance(msg, SystemMessage):
+                    if msg.subtype == "init" and msg.data.get("model"):
+                        real_model = msg.data["model"]
+                        print(f"[agent] чат {s.chat_id}: ход {job.turn_id}"
+                              f" на модели {real_model}")
                 elif isinstance(msg, ResultMessage):
                     sdk_session_id = getattr(msg, "session_id", None)
                     cost = getattr(msg, "total_cost_usd", None)
@@ -787,7 +810,7 @@ class SessionManager:
             store.finish_turn(conn, job.turn_id, status="done",
                               sdk_session_id=sdk_session_id, cost_usd=cost_usd,
                               files=files_rel, tools=tools,
-                              commit_hash=commit_hash)
+                              commit_hash=commit_hash, model=real_model)
         finally:
             conn.close()
         await push_db(status="final")

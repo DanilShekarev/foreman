@@ -83,6 +83,12 @@ def init_db(conn: sqlite3.Connection) -> None:
     rcols = {r[1] for r in conn.execute("PRAGMA table_info(chat_reads)")}
     if "read_at" not in rcols:
         conn.execute("ALTER TABLE chat_reads ADD COLUMN read_at TEXT")
+    ccols = {r[1] for r in conn.execute("PRAGMA table_info(chats)")}
+    if "model" not in ccols:
+        conn.execute("ALTER TABLE chats ADD COLUMN model TEXT")
+    tcols = {r[1] for r in conn.execute("PRAGMA table_info(agent_turns)")}
+    if "model" not in tcols:
+        conn.execute("ALTER TABLE agent_turns ADD COLUMN model TEXT")
     kcols = {r[1] for r in conn.execute("PRAGMA table_info(kanban_cards)")}
     for col, ddl in (("priority", "TEXT NOT NULL DEFAULT 'normal'"),
                      ("due_date", "TEXT"), ("updated_by", "INTEGER")):
@@ -368,6 +374,16 @@ def create_agent_chat(conn: sqlite3.Connection, user: dict) -> dict:
                      (cur.lastrowid, user["id"]))
         _add_change(conn, cur.lastrowid, "chat_new", cur.lastrowid)
     return get_chat(conn, cur.lastrowid)
+
+
+def set_chat_model(conn: sqlite3.Connection, chat_id: int,
+                   model: Optional[str]) -> None:
+    """Модель агента для чата; None/'' — вернуться к дефолту сервера.
+    Валидность значения проверяет ручка (список живёт в agent.MODELS)."""
+    with write_tx(conn):
+        conn.execute("UPDATE chats SET model = ? WHERE id = ?",
+                     (model or None, chat_id))
+        _add_change(conn, chat_id, "chat_upd", chat_id)
 
 
 def rename_chat(conn: sqlite3.Connection, chat_id: int, title: str) -> None:
@@ -825,7 +841,8 @@ def finish_turn(conn: sqlite3.Connection, turn_id: int, *, status: str,
                 files: Optional[list[str]] = None,
                 tools: Optional[list[dict]] = None,
                 commit_hash: Optional[str] = None,
-                error: Optional[str] = None) -> None:
+                error: Optional[str] = None,
+                model: Optional[str] = None) -> None:
     with write_tx(conn):
         row = conn.execute("SELECT chat_id FROM agent_turns WHERE id = ?",
                            (turn_id,)).fetchone()
@@ -834,11 +851,11 @@ def finish_turn(conn: sqlite3.Connection, turn_id: int, *, status: str,
         conn.execute(
             f"UPDATE agent_turns SET status = ?, sdk_session_id = ?, cost_usd = ?,"
             f" files_json = ?, tools_json = ?, commit_hash = ?, error = ?,"
-            f" finished_at = {NOW_SQL} WHERE id = ?",
+            f" model = ?, finished_at = {NOW_SQL} WHERE id = ?",
             (status, sdk_session_id, cost_usd,
              json.dumps(files or [], ensure_ascii=False),
              json.dumps(tools or [], ensure_ascii=False),
-             commit_hash, error, turn_id))
+             commit_hash, error, model, turn_id))
         if sdk_session_id:
             conn.execute(
                 f"INSERT INTO agent_sessions(chat_id, sdk_session_id, updated_at)"

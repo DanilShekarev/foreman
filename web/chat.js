@@ -43,6 +43,9 @@ const CHAT = (() => {
     lastMsgId = 0;  // id глобальные: без сброса чужой чат дал бы ложный «блип»
     histLimit = 60;
     histEnd = false;
+    fillModelSel();
+    modelSel.style.display = "";
+    modelSel.value = chat.model || "";
     await refetch(true);
   }
 
@@ -99,6 +102,9 @@ const CHAT = (() => {
       titleEl.textContent = chatLabel(current);
       APP.refreshChats();
     }
+    // Модель мог сменить другой участник — синхронизируем селектор.
+    if (data.chat && document.activeElement !== modelSel)
+      modelSel.value = data.chat.model || "";
     if (stick) scrollBottom(messagesEl);
     const prevLast = lastMsgId;
     if (data.messages.length){
@@ -186,6 +192,36 @@ const CHAT = (() => {
       body: JSON.stringify({last_message_id: lastMsgId}),
     }).then(() => APP.refreshChats());
   }
+
+  // ------------------------------------------------- модель агента чата
+
+  const modelSel = document.getElementById("model-select");
+
+  function fillModelSel(){
+    if (modelSel.options.length || !window.ME || !window.ME.models) return;
+    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    const def = document.createElement("option");
+    def.value = "";
+    def.textContent = `Авто (${cap(window.ME.model_default || "")})`;
+    modelSel.appendChild(def);
+    for (const m of window.ME.models){
+      const o = document.createElement("option");
+      o.value = m;
+      o.textContent = cap(m);
+      modelSel.appendChild(o);
+    }
+  }
+
+  modelSel.onchange = async () => {
+    if (!current) return;
+    const r = await fetch(`api/chats/${current.id}/model`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({model: modelSel.value}),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (data.error){ alert(data.error); return; }
+    current.model = modelSel.value || null;
+  };
 
   function updateAgentState(st){
     if (!st) { agentStateEl.textContent = ""; stopBtn.style.display = "none"; return; }
@@ -671,9 +707,24 @@ const CHAT = (() => {
     // если читатель был внизу, дожимаем скролл.
     const scroller = div.closest("#messages, #thread-messages");
     const stick = scroller && nearBottom(scroller);
+    renderModelBadge(div, turn);
     renderToolLines(div, turn.tools);
     renderTurnPlaque(div, turn);
     if (stick) scroller.scrollTop = scroller.scrollHeight;
+  }
+
+  // Фактическая модель хода (из init SDK) — самоотчётам модели верить нельзя.
+  function renderModelBadge(div, turn){
+    if (!turn.model) return;
+    const head = div.querySelector(".head");
+    if (!head || head.querySelector(".turn-model")) return;
+    const b = document.createElement("span");
+    b.className = "turn-model";
+    b.title = "Модель этого хода: " + turn.model;
+    b.textContent = turn.model.replace(/^claude-/, "");
+    const actions = head.querySelector(".msg-actions");
+    if (actions) head.insertBefore(b, actions);
+    else head.appendChild(b);
   }
 
   // Строки «🔧 инструмент» при перерисовке ленты — из tools_json хода.
