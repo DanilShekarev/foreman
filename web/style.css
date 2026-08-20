@@ -517,48 +517,52 @@ input:focus,textarea:focus{outline:none;border-color:var(--accent);
 
 /* ============================================================ Toast UI */
 /* Стоковые css завендорены; здесь только подгонка под токены темы.
-   Тёмный вариант включается классом .toastui-editor-dark на #toast-holder. */
+   Тёмный вариант включается классом .toastui-editor-dark на холдере.
+   .gd-toast — общий класс холдеров (волт #toast-holder, панель канбана). */
 #toast-holder{flex:1;min-height:0;display:flex;flex-direction:column}
-#toast-holder .toastui-editor-defaultUI{flex:1;min-height:0;border:none;
+.kb-p-body-toast{margin-bottom:6px}
+.gd-toast.kb-p-body-toast .toastui-editor-defaultUI{
+  border:1px solid var(--border);border-radius:var(--radius-sm)}
+.gd-toast .toastui-editor-defaultUI{flex:1;min-height:0;border:none;
   border-radius:0;display:flex;flex-direction:column}
-#toast-holder .toastui-editor-defaultUI-toolbar{background:var(--bg1);
+.gd-toast .toastui-editor-defaultUI-toolbar{background:var(--bg1);
   border-bottom:1px solid var(--border);border-radius:0}
-#toast-holder .toastui-editor-defaultUI-toolbar button{border-color:transparent}
-#toast-holder .toastui-editor-toolbar-divider{background:var(--border)}
-#toast-holder .toastui-editor-main{flex:1;min-height:0}
-#toast-holder .toastui-editor-defaultUI .ProseMirror,
-#toast-holder .toastui-editor-md-container .toastui-editor{background:var(--bg0)}
-#toast-holder .toastui-editor-md-container,
-#toast-holder .toastui-editor-ww-container{background:var(--bg0)}
-#toast-holder .toastui-editor-mode-switch{background:var(--bg1);
+.gd-toast .toastui-editor-defaultUI-toolbar button{border-color:transparent}
+.gd-toast .toastui-editor-toolbar-divider{background:var(--border)}
+.gd-toast .toastui-editor-main{flex:1;min-height:0}
+.gd-toast .toastui-editor-defaultUI .ProseMirror,
+.gd-toast .toastui-editor-md-container .toastui-editor{background:var(--bg0)}
+.gd-toast .toastui-editor-md-container,
+.gd-toast .toastui-editor-ww-container{background:var(--bg0)}
+.gd-toast .toastui-editor-mode-switch{background:var(--bg1);
   border-top:1px solid var(--border)}
-#toast-holder .toastui-editor-mode-switch .tab-item{background:var(--bg2);
+.gd-toast .toastui-editor-mode-switch .tab-item{background:var(--bg2);
   border-color:var(--border);color:var(--fg-dim)}
-#toast-holder .toastui-editor-mode-switch .tab-item.active{background:var(--bg0);
+.gd-toast .toastui-editor-mode-switch .tab-item.active{background:var(--bg0);
   color:var(--fg)}
-#toast-holder .toastui-editor-contents{font-size:14px;color:var(--fg)}
-#toast-holder .toastui-editor-contents h1,
-#toast-holder .toastui-editor-contents h2{border-color:var(--border)}
-#toast-holder .toastui-editor-contents h1,#toast-holder .toastui-editor-contents h2,
-#toast-holder .toastui-editor-contents h3,#toast-holder .toastui-editor-contents h4,
-#toast-holder .toastui-editor-contents h5,#toast-holder .toastui-editor-contents h6,
-#toast-holder .toastui-editor-contents p,
-#toast-holder .toastui-editor-contents li{color:var(--fg)}
-#toast-holder .toastui-editor-contents blockquote{border-left:3px solid var(--accent);
+.gd-toast .toastui-editor-contents{font-size:14px;color:var(--fg)}
+.gd-toast .toastui-editor-contents h1,
+.gd-toast .toastui-editor-contents h2{border-color:var(--border)}
+.gd-toast .toastui-editor-contents h1,.gd-toast .toastui-editor-contents h2,
+.gd-toast .toastui-editor-contents h3,.gd-toast .toastui-editor-contents h4,
+.gd-toast .toastui-editor-contents h5,.gd-toast .toastui-editor-contents h6,
+.gd-toast .toastui-editor-contents p,
+.gd-toast .toastui-editor-contents li{color:var(--fg)}
+.gd-toast .toastui-editor-contents blockquote{border-left:3px solid var(--accent);
   color:var(--fg-dim)}
-#toast-holder .toastui-editor-contents code{background:var(--bg2);
+.gd-toast .toastui-editor-contents code{background:var(--bg2);
   border:1px solid var(--border);color:var(--fg)}
-#toast-holder .toastui-editor-contents pre{background:var(--bg1);
+.gd-toast .toastui-editor-contents pre{background:var(--bg1);
   border:1px solid var(--border)}
-#toast-holder .toastui-editor-contents pre code{background:none;border:none}
-#toast-holder .toastui-editor-contents th{background:var(--bg2)}
-#toast-holder .toastui-editor-contents th,
-#toast-holder .toastui-editor-contents td{border-color:var(--border);color:var(--fg)}
-#toast-holder .toastui-editor-contents .wikilink{color:var(--green);
+.gd-toast .toastui-editor-contents pre code{background:none;border:none}
+.gd-toast .toastui-editor-contents th{background:var(--bg2)}
+.gd-toast .toastui-editor-contents th,
+.gd-toast .toastui-editor-contents td{border-color:var(--border);color:var(--fg)}
+.gd-toast .toastui-editor-contents .wikilink{color:var(--green);
   border-bottom:1px dashed color-mix(in srgb,var(--green) 55%,transparent)}
-#toast-holder .toastui-editor-contents .mention{color:var(--accent);font-weight:600;
+.gd-toast .toastui-editor-contents .mention{color:var(--accent);font-weight:600;
   background:var(--accent-soft);border-radius:5px;padding:0 4px}
-#toast-holder .toastui-editor-ww-code-block-language{background:var(--bg1)}
+.gd-toast .toastui-editor-ww-code-block-language{background:var(--bg1)}
 
 /* ============================================== галочки прочитанности */
 .ticks{color:var(--fg-faint);font-size:12px;letter-spacing:-2px;cursor:default}

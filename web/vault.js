@@ -38,6 +38,7 @@ const VAULT = (() => {
     if (!toastHolder){
       toastHolder = document.createElement("div");
       toastHolder.id = "toast-holder";
+      toastHolder.className = "gd-toast";
       editEl.parentNode.insertBefore(toastHolder, editEl);
       toastHolder.addEventListener("keydown", e => {
         if (e.key === "s" && e.ctrlKey){ e.preventDefault(); save(); }

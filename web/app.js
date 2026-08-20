@@ -22,11 +22,15 @@ const APP = (() => {
     window.USERS = await (await fetch("api/users")).json();
     await refreshChats();
     await VAULT.refreshTree();
-    // Навигация переживает перезагрузку: последний чат, док и видимость волта.
+    // Навигация переживает перезагрузку: последний чат, док, видимость волта
+    // и открытая доска задач. Флаг доски читаем ДО selectChat: тот закрывает
+    // оверлей и стирает флаг.
+    const kbWasOpen = localStorage.getItem("gd_kb_open") === "1";
     const savedId = +localStorage.getItem("gd_last_chat");
     const startChat = chats.find(c => c.id === savedId) ||
                       chats.find(c => c.kind === "agent");
     if (startChat) selectChat(startChat.id);
+    if (kbWasOpen) KANBAN.open();
     if (localStorage.getItem("gd_vault_hidden") === "1"){
       appEl.classList.add("vault-hidden");
       vaultPane.classList.add("hidden");
@@ -207,7 +211,7 @@ const APP = (() => {
     for (const c of items){
       const div = document.createElement("div");
       div.className = "chat-item" +
-        (CHAT.currentId() === c.id ? " active" : "") +
+        (CHAT.currentId() === c.id && !KANBAN.isOpen() ? " active" : "") +
         (c.kind === "channel" && !c.is_member ? " not-member" : "");
       const icon = c.kind === "agent" ? "🤖" : c.kind === "dm" ? "✉️" : (c.is_private ? "🔒" : "#");
       let badge = "";
@@ -513,5 +517,6 @@ const APP = (() => {
   }
 
   boot();
-  return { refreshChats, showVault, selectChat, pickFromList, afterChatDeleted };
+  return { refreshChats, showVault, selectChat, pickFromList, afterChatDeleted,
+           rerenderLists: renderChatLists };
 })();

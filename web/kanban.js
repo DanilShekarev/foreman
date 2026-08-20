@@ -169,13 +169,27 @@ const KANBAN = (() => {
     };
   }
 
+  // Подсветка в сайдбаре: доска открыта — активен пункт «Задачи», чат гаснет
+  // (renderList в app.js смотрит на isOpen()). Флаг переживает перезагрузку.
+  function syncNav(on){
+    const nav = document.getElementById("nav-kanban");
+    if (nav) nav.classList.toggle("active", on);
+    // const APP не попадает в window — проверять только через typeof.
+    if (typeof APP !== "undefined" && APP.rerenderLists) APP.rerenderLists();
+  }
+
   async function open(){
     ensureView().style.display = "flex";
+    localStorage.setItem("gd_kb_open", "1");
+    syncNav(true);
     await refresh();
   }
 
   function close(){
-    if (view) view.style.display = "none";
+    if (!view || view.style.display === "none") return;
+    view.style.display = "none";
+    localStorage.removeItem("gd_kb_open");
+    syncNav(false);
   }
 
   async function refresh(){
@@ -542,8 +556,51 @@ const KANBAN = (() => {
 
   function panelBusy(){
     const p = view.querySelector("#kb-panel");
+    if (p.querySelector(".kb-p-body-toast")) return true;  // описание правится
     const a = document.activeElement;
-    return p.contains(a) && (a.tagName === "TEXTAREA" || a.tagName === "INPUT");
+    return p.contains(a) && (a.tagName === "TEXTAREA" ||
+                             a.tagName === "INPUT" || a.isContentEditable);
+  }
+
+  // WYSIWYG для описания карточки: тот же Toast UI, что в волте, но компактный
+  // и без картинок (у карточек нет своего хранилища файлов). null — нет vendor.
+  function makeBodyEditor(holder, text){
+    if (!window.toastui || !toastui.Editor) return null;
+    const ed = new toastui.Editor({
+      el: holder,
+      height: "280px",
+      initialEditType: "wysiwyg",
+      previewStyle: "tab",
+      initialValue: text,
+      language: "ru",
+      usageStatistics: false,
+      autofocus: true,
+      toolbarItems: [
+        ["heading", "bold", "italic", "strike"],
+        ["ul", "ol", "task"],
+        ["table", "link"],
+        ["code", "codeblock"],
+      ],
+      widgetRules: [
+        {rule: /\[\[[^\[\]\n]+\]\]/,
+         toDOM(t){
+           const s = document.createElement("span");
+           s.className = "wikilink";
+           s.textContent = t.slice(2, -2);
+           return s;
+         }},
+        {rule: /@([a-zA-Z0-9_.-]+|агент)/,
+         toDOM(t){
+           const s = document.createElement("span");
+           s.className = "mention";
+           s.textContent = t;
+           return s;
+         }},
+      ],
+    });
+    holder.classList.toggle("toastui-editor-dark",
+      document.documentElement.dataset.theme !== "light");
+    return ed;
   }
 
   function closePanel(){
@@ -780,20 +837,32 @@ const KANBAN = (() => {
 
     p.querySelector("#kb-p-body-edit").onclick = () => {
       const box = p.querySelector("#kb-p-body");
-      const ta = document.createElement("textarea");
-      ta.rows = 8; ta.value = c.body || "";
-      ta.className = "kb-p-body-edit";
+      const holder = document.createElement("div");
+      holder.className = "gd-toast kb-p-body-toast";
+      box.replaceWith(holder);
+      const ed = makeBodyEditor(holder, c.body || "");
+      let ta = null;
+      if (!ed){  // vendor не загрузился — обычная textarea
+        ta = document.createElement("textarea");
+        ta.rows = 8; ta.value = c.body || "";
+        ta.className = "kb-p-body-edit";
+        holder.replaceWith(ta);
+      }
       const row = document.createElement("div");
       row.className = "kb-p-addline";
       row.innerHTML = `<button id="kb-p-body-save">Сохранить</button>
                        <button id="kb-p-body-cancel">Отмена</button>`;
-      box.replaceWith(ta);
-      ta.after(row);
-      ta.focus();
-      row.querySelector("#kb-p-body-cancel").onclick = () => renderPanel();
+      (ta || holder).after(row);
+      if (ta) ta.focus();
+      const finish = () => { if (ed) ed.destroy(); };
+      row.querySelector("#kb-p-body-cancel").onclick = () => {
+        finish(); renderPanel();
+      };
       row.querySelector("#kb-p-body-save").onclick = async () => {
-        mergeCard(await patchCard(c.id, {body: ta.value}));
-        panelCard.body = ta.value;
+        const text = ed ? ed.getMarkdown() : ta.value;
+        finish();
+        mergeCard(await patchCard(c.id, {body: text}));
+        panelCard.body = text;
         renderPanel();
       };
     };
