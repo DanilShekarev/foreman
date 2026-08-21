@@ -30,7 +30,33 @@ const VAULT = (() => {
                           {method: "POST", body: fd});
     const data = await r.json().catch(() => ({error: "ошибка загрузки картинки"}));
     if (data.error){ APP.alert(data.error); return; }
-    callback(data.rel, blob.name || "");
+    // В редактор — резолвнутый адрес (WYSIWYG грузит src от URL страницы,
+    // относительный путь волта там бьётся); в md при сохранении imgFromApi
+    // вернёт относительный.
+    callback(MD.resolveRel(currentPath, data.rel), blob.name || "");
+  }
+
+  // Картинки в Toast UI: в файле волта живут ОТНОСИТЕЛЬНЫЕ пути (их понимает
+  // агент и git-история), а редактору нужны загружаемые адреса. Туда —
+  // резолвим в api/vault/file, обратно — восстанавливаем относительный путь.
+  const IMG_MD = /(!\[[^\]]*\]\(\s*)([^)\s]+)((?:\s+"[^"]*")?\s*\))/g;
+
+  function imgToApi(text){
+    return text.replace(IMG_MD,
+      (m, a, src, b) => a + MD.resolveRel(currentPath, src) + b);
+  }
+
+  function imgFromApi(text){
+    const dirParts = currentPath ? currentPath.split("/").slice(0, -1) : [];
+    return text.replace(IMG_MD, (m, a, src, b) => {
+      const enc = src.match(/^api\/vault\/file\?path=(.+)$/);
+      if (!enc) return m;
+      const parts = decodeURIComponent(enc[1]).split("/");
+      let i = 0;
+      while (i < dirParts.length && i < parts.length - 1 &&
+             dirParts[i] === parts[i]) i++;
+      return a + "../".repeat(dirParts.length - i) + parts.slice(i).join("/") + b;
+    });
   }
 
   function ensureToast(text){
@@ -255,7 +281,7 @@ const VAULT = (() => {
     viewEl.style.display = on ? "none" : "";
     saveBtn.style.display = on ? "" : "none";
     editBtn.style.display = readonly ? "none" : (on ? "none" : "");
-    const wys = on && !readonly && ensureToast(editEl.value);
+    const wys = on && !readonly && ensureToast(imgToApi(editEl.value));
     if (!wys) destroyToast();
     const rich = on && !wys && ensureCM();
     editEl.style.display = on && !wys && !rich ? "" : "none";
@@ -269,7 +295,7 @@ const VAULT = (() => {
   }
 
   function editorText(){
-    if (toast) return toast.getMarkdown();
+    if (toast) return imgFromApi(toast.getMarkdown());
     return (cm && cmHolder && cmHolder.style.display !== "none")
       ? cm.getValue() : editEl.value;
   }

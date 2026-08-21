@@ -650,8 +650,13 @@ const KANBAN = (() => {
 
   async function reloadPanel(){
     if (openCardId == null) return;
-    const r = await fetch(`api/kanban/${openCardId}`);
+    const id = openCardId;
+    const r = await fetch(`api/kanban/${id}`);
     const card = await r.json().catch(() => ({}));
+    // Пока грузили, открыли другую карточку (openCard по ссылке #N из чата
+    // стартует reloadPanel из refresh() ещё со старым id) — не даём отставшему
+    // ответу перерисовать панель обратно (#85).
+    if (id !== openCardId) return;
     if (card.error){ closePanel(); return; }
     panelCard = card;
     renderPanel();

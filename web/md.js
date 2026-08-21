@@ -5,7 +5,8 @@ const MD = (() => {
   function esc(s){return s.replace(/[&<>]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));}
 
   function resolveRel(docPath, src){
-    if (/^(https?:|data:)/.test(src)) return src;
+    // api/… — уже резолвнутый адрес (редактор волта), второй раз не трогаем.
+    if (/^(https?:|data:|api\/)/.test(src)) return src;
     const base = docPath ? docPath.split("/").slice(0,-1) : [];
     const parts = base.concat(src.split("/"));
     const out = [];
@@ -18,15 +19,21 @@ const MD = (() => {
 
   function mdInline(s, opt){
     s = esc(s);
-    s = s.replace(/!\[([^\]]*)\]\(([^)]+)\)/g,
-      (m, alt, src) => `<img alt="${alt}" src="${resolveRel(opt.docPath, src)}">`);
-    s = s.replace(/`([^`]+)`/g, "<code>$1</code>");
+    // Готовый HTML прячется в плашки \x00N\x00 до конца замен: иначе
+    // последующие правила находят «m123» или «#12» ВНУТРИ src/href (base64
+    // data-URI, внешние URL) и рвут тег вставленным <span>.
+    const stash = [];
+    const keep = html => `\x00${stash.push(html) - 1}\x00`;
+    s = s.replace(/!\[([^\]]*)\]\(\s*([^)\s]+)(?:\s+"[^"]*")?\s*\)/g,
+      (m, alt, src) => keep(`<img alt="${alt}" src="${resolveRel(opt.docPath, src)}">`));
+    s = s.replace(/`([^`]+)`/g, (m, code) => keep(`<code>${code}</code>`));
     s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
     s = s.replace(/\[\[([^\]]+)\]\]/g,
-      (m, name) => `<span class="wikilink" data-wiki="${name.replace(/"/g,'&quot;')}">${name}</span>`);
-    s = s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+      (m, name) => keep(`<span class="wikilink" data-wiki="${name.replace(/"/g,'&quot;')}">${name}</span>`));
+    s = s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,
+      (m, text, href) => keep(`<a href="${href}" target="_blank">${text}</a>`));
     s = s.replace(/(^|\s)@([a-zA-Z0-9_.-]+|агент)/g, (m, pre, login) => {
       const meCls = (window.ME && login.toLowerCase() === window.ME.login) ? " me" : "";
       return `${pre}<span class="mention${meCls}">@${login}</span>`;
@@ -41,6 +48,7 @@ const MD = (() => {
     // (см. prompts.channel_context). Клик ведёт к сообщению в ленте.
     s = s.replace(/(?<![\w&#])m(\d+)\b/g, (x, id) =>
       `<span class="msg-link" data-msg="${id}">m${id}</span>`);
+    s = s.replace(/\x00(\d+)\x00/g, (m, i) => stash[+i]);
     return s;
   }
 
