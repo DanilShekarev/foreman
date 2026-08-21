@@ -495,7 +495,9 @@ async def api_messages(chat_id: int, request: Request, before: int | None = None
         return {"chat": chat, "messages": msgs, "member_ids": members,
                 "agent": manager.status(chat_id),
                 "pin_count": store.pin_count(conn, chat_id),
-                "reads": store.chat_reads_info(conn, chat_id)}
+                "reads": store.chat_reads_info(conn, chat_id),
+                "mention_roots": store.thread_mention_roots(
+                    conn, chat_id, me(request))}
     except store.StoreError as exc:
         return _err(exc)
     finally:

@@ -952,3 +952,5 @@ body.kb-dragging{cursor:grabbing;user-select:none}
   text-transform:uppercase}
 .new-sep::before,.new-sep::after{content:"";flex:1;height:1px;
   background:color-mix(in srgb,var(--accent) 45%,transparent)}
+/* «N ответов · вас упомянули» — в треде непрочитанный пинг (#81) */
+.reply-link.mention{color:var(--yellow);font-weight:600}

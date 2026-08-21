@@ -478,12 +478,18 @@ def list_chats(conn: sqlite3.Connection, user: dict) -> list[dict]:
             "SELECT COUNT(*) AS n, MAX(EXISTS("
             "  SELECT 1 FROM mentions mn WHERE mn.message_id = messages.id"
             "  AND mn.user_id = ?)) AS mentioned"
-            " FROM messages WHERE chat_id = ? AND id > ? AND thread_root_id IS NULL"
+            " FROM messages WHERE chat_id = ? AND id > ?"
             " AND NOT (author_kind = 'user' AND author_user_id = ?)"
             # Стримящийся ответ агента ещё «не доставлен» — иначе весь ход
             # висел бы ложный бейдж непрочитанного у смотрящего на стрим.
-            " AND status != 'streaming'",
-            (user["id"], chat["id"], chat["last_read"], user["id"])).fetchone()
+            " AND status != 'streaming'"
+            # Треды бейджем не пугают, НО @упоминание в треде — считается:
+            # иначе пинг в треде для адресата невидим (#81).
+            " AND (thread_root_id IS NULL OR EXISTS("
+            "  SELECT 1 FROM mentions mn2 WHERE mn2.message_id = messages.id"
+            "  AND mn2.user_id = ?))",
+            (user["id"], chat["id"], chat["last_read"], user["id"],
+             user["id"])).fetchone()
         chat["unread"] = unread["n"]
         chat["mentioned"] = bool(unread["mentioned"])
         if chat["kind"] == "dm":
@@ -513,6 +519,23 @@ def mark_read(conn: sqlite3.Connection, chat_id: int, user: dict,
             f"   read_at = excluded.read_at",
             (chat_id, user["id"], last_message_id))
         _add_change(conn, chat_id, "read", user["id"])
+
+
+def thread_mention_roots(conn: sqlite3.Connection, chat_id: int,
+                         user: dict) -> list[int]:
+    """Корни тредов этого чата, где есть непрочитанные @упоминания
+    пользователя, — фронт подсвечивает ссылку «N ответов» у корня (#81)."""
+    row = conn.execute(
+        "SELECT last_read_message_id FROM chat_reads"
+        " WHERE chat_id = ? AND user_id = ?",
+        (chat_id, user["id"])).fetchone()
+    last_read = row["last_read_message_id"] if row else 0
+    return [r["r"] for r in conn.execute(
+        "SELECT DISTINCT m.thread_root_id AS r FROM messages m"
+        " JOIN mentions mn ON mn.message_id = m.id AND mn.user_id = ?"
+        " WHERE m.chat_id = ? AND m.thread_root_id IS NOT NULL"
+        " AND m.id > ? AND m.deleted_at IS NULL",
+        (user["id"], chat_id, last_read))]
 
 
 def chat_reads_info(conn: sqlite3.Connection, chat_id: int) -> list[dict]:

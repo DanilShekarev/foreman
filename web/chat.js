@@ -25,6 +25,7 @@ const CHAT = (() => {
   let memberIds = [];          // участники текущего чата — для сортировки @упоминаний
   let newSepId = 0;            // перед этим сообщением — черта «Новые сообщения»
   let pendingNewSep = false;   // вычислить границу при ближайшем refetch (открытие)
+  let mentionRoots = null;     // корни тредов с непрочитанными @меня (#81)
 
   // ------------------------------------------------------------- открытие
 
@@ -50,6 +51,7 @@ const CHAT = (() => {
     // истории сразу берём с запасом, чтобы черта попала в выборку.
     newSepId = 0;
     pendingNewSep = true;
+    mentionRoots = null;
     histLimit = Math.max(60, Math.min(1000, (chat.unread || 0) + 30));
     histEnd = false;
     fillModelSel();
@@ -104,6 +106,13 @@ const CHAT = (() => {
     histEnd = data.messages.length < histLimit;  // старее уже ничего нет
     chatReads = data.reads || [];
     memberIds = data.member_ids || [];
+    // Пинг в треде: новый корень с непрочитанным @меня — «динь-дон», даже
+    // если сам тредовый ответ в ленту не попадает.
+    const prevRoots = mentionRoots;
+    mentionRoots = data.mention_roots || [];
+    if (prevRoots !== null &&
+        mentionRoots.some(id => !prevRoots.includes(id)))
+      SOUND.mention();
     // Граница непрочитанного — по СВОЕЙ отметке из этого же ответа (reads
     // сняты до того, как markRead ниже её сдвинет): первое чужое сообщение
     // новее прочитанного.
@@ -381,7 +390,12 @@ const CHAT = (() => {
     if (canThread && m.reply_count > 0){
       const link = document.createElement("span");
       link.className = "reply-link";
-      link.innerHTML = `${ICON("thread", "sm")} ${m.reply_count} ${plural(m.reply_count, "ответ", "ответа", "ответов")}`;
+      // В треде есть непрочитанное @упоминание меня — подсветить, чтобы
+      // было видно, КУДА идти за пингом (#81).
+      const pinged = (mentionRoots || []).includes(m.id);
+      if (pinged) link.classList.add("mention");
+      link.innerHTML = `${ICON("thread", "sm")} ${m.reply_count} ${plural(m.reply_count, "ответ", "ответа", "ответов")}` +
+        (pinged ? " · вас упомянули" : "");
       link.onclick = () => openThread(m);
       main.appendChild(link);
     }
@@ -1106,6 +1120,16 @@ const CHAT = (() => {
     appendWithDaySep(threadMessagesEl, data.messages, {inThread: true});
     applyTicks();
     if (stick) scrollBottom(threadMessagesEl);
+    // Открытый тред прочитан: двигаем отметку до его последнего сообщения —
+    // это гасит бейдж тредового @упоминания (#81). Побочно пометятся и
+    // сообщения ленты с меньшим id — читающий тред и так смотрит на чат.
+    const maxId = Math.max(0, ...data.messages.map(m => m.id));
+    if (maxId && chatVisible()){
+      fetch(`api/chats/${current.id}/read`, {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({last_message_id: maxId}),
+      }).then(() => APP.refreshChats());
+    }
   }
 
   async function threadSend(){
