@@ -23,6 +23,8 @@ const CHAT = (() => {
   let chatReads = [];          // кто до какого сообщения дочитал (галочки)
   let replyTo = null;          // ответ на сообщение (как в ТГ)
   let memberIds = [];          // участники текущего чата — для сортировки @упоминаний
+  let newSepId = 0;            // перед этим сообщением — черта «Новые сообщения»
+  let pendingNewSep = false;   // вычислить границу при ближайшем refetch (открытие)
 
   // ------------------------------------------------------------- открытие
 
@@ -43,7 +45,12 @@ const CHAT = (() => {
     chatReads = [];
     memberIds = [];
     lastMsgId = 0;  // id глобальные: без сброса чужой чат дал бы ложный «блип»
-    histLimit = 60;
+    // Черта «Новые сообщения»: границу считаем по reads ПЕРВОГО refetch
+    // (markRead тут же сдвинет прочитанность — позже будет поздно), окно
+    // истории сразу берём с запасом, чтобы черта попала в выборку.
+    newSepId = 0;
+    pendingNewSep = true;
+    histLimit = Math.max(60, Math.min(1000, (chat.unread || 0) + 30));
     histEnd = false;
     fillModelSel();
     modelSel.style.display = "";
@@ -78,6 +85,13 @@ const CHAT = (() => {
         container.appendChild(sep);
         lastDay = day;
       }
+      // Черта «Новые сообщения» — держится всё время визита в чат.
+      if (!opts.inThread && newSepId && m.id === newSepId){
+        const ns = document.createElement("div");
+        ns.className = "new-sep";
+        ns.innerHTML = "<span>Новые сообщения</span>";
+        container.appendChild(ns);
+      }
       container.appendChild(renderMessage(m, opts));
     }
   }
@@ -90,6 +104,19 @@ const CHAT = (() => {
     histEnd = data.messages.length < histLimit;  // старее уже ничего нет
     chatReads = data.reads || [];
     memberIds = data.member_ids || [];
+    // Граница непрочитанного — по СВОЕЙ отметке из этого же ответа (reads
+    // сняты до того, как markRead ниже её сдвинет): первое чужое сообщение
+    // новее прочитанного.
+    if (pendingNewSep){
+      pendingNewSep = false;
+      const mine = (data.reads || []).find(x => window.ME &&
+                                               x.user_id === window.ME.id);
+      const lastRead = mine ? mine.last_read_message_id : 0;
+      const firstNew = data.messages.find(m => m.id > lastRead &&
+        !(m.author_kind === "user" && window.ME &&
+          m.author_user_id === window.ME.id));
+      newSepId = firstNew ? firstNew.id : 0;
+    }
     const stick = scroll || nearBottom(messagesEl);
     messagesEl.innerHTML = "";
     appendWithDaySep(messagesEl, data.messages, {});
@@ -108,7 +135,13 @@ const CHAT = (() => {
     // Модель мог сменить другой участник — синхронизируем селектор.
     if (data.chat && document.activeElement !== modelSel)
       modelSel.value = data.chat.model || "";
-    if (stick) scrollBottom(messagesEl);
+    // При открытии чата с непрочитанным крутим не в самый низ, а к черте
+    // «Новые сообщения» (с отступом, чтобы она не прилипала к шапке).
+    const sep = scroll && newSepId && messagesEl.querySelector(".new-sep");
+    if (sep){
+      sep.scrollIntoView({block: "start"});
+      messagesEl.scrollTop -= 56;
+    } else if (stick) scrollBottom(messagesEl);
     const prevLast = lastMsgId;
     if (data.messages.length){
       lastMsgId = data.messages[data.messages.length - 1].id;
