@@ -731,6 +731,53 @@ def replies_to_thread(conn: sqlite3.Connection, msg_id: int) -> dict:
     return get_message(conn, root["id"])
 
 
+def messages_to_thread(conn: sqlite3.Connection, chat_id: int, root_id: int,
+                       message_ids: list[int]) -> dict:
+    """Перенести произвольный набор сообщений ленты в тред указанного корня
+    (инструмент агента «раскидай сообщения по тредам»). В отличие от
+    replies_to_thread (идёт по цепочке reply_to_id) набор сообщений
+    произвольный, поэтому валидация строже. Возвращает корень."""
+    message_ids = [mid for mid in dict.fromkeys(message_ids) if mid != root_id]
+    if not message_ids:
+        raise StoreError("нечего переносить")
+    with write_tx(conn):
+        root = conn.execute("SELECT * FROM messages WHERE id = ? AND chat_id = ?",
+                            (root_id, chat_id)).fetchone()
+        if root is None:
+            raise NotFound("корень треда не найден в этом чате")
+        if root["thread_root_id"] is not None:
+            raise StoreError("корнем треда не может быть сообщение,"
+                             " которое само уже в чужом треде")
+        qmarks = ",".join("?" * len(message_ids))
+        rows = conn.execute(
+            f"SELECT * FROM messages WHERE id IN ({qmarks})",
+            message_ids).fetchall()
+        found = {r["id"]: r for r in rows}
+        missing = [mid for mid in message_ids if mid not in found]
+        if missing:
+            raise StoreError("нет сообщений с id: "
+                             + ", ".join(str(m) for m in missing))
+        for mid in message_ids:
+            r = found[mid]
+            if r["chat_id"] != chat_id:
+                raise StoreError(f"сообщение #{mid} из другого чата")
+            if r["thread_root_id"] is not None:
+                raise StoreError(f"сообщение #{mid} уже в треде")
+            has_replies = conn.execute(
+                "SELECT 1 FROM messages WHERE thread_root_id = ? LIMIT 1",
+                (mid,)).fetchone()
+            if has_replies:
+                raise StoreError(f"сообщение #{mid} — корень другого"
+                                 " треда, переносить его нельзя")
+        conn.execute(
+            f"UPDATE messages SET thread_root_id = ?, updated_at = {NOW_SQL}"
+            f" WHERE id IN ({qmarks})", (root_id, *message_ids))
+        for mid in message_ids:
+            _add_change(conn, chat_id, "message_upd", mid)
+        _add_change(conn, chat_id, "message_upd", root_id)
+    return get_message(conn, root_id)
+
+
 def toggle_pin(conn: sqlite3.Connection, msg_id: int, user: dict) -> bool:
     """Закреп/съём — любым участником чата (проверка доступа на ручке).
     Возвращает новое состояние: True = закреплено."""

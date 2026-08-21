@@ -59,11 +59,22 @@ KANBAN_TOOLS = ("mcp__kanban__list_cards", "mcp__kanban__create_card",
                 "mcp__kanban__move_card", "mcp__kanban__update_card",
                 "mcp__kanban__get_card", "mcp__kanban__comment_card",
                 "mcp__kanban__checklist_add", "mcp__kanban__checklist_set")
+THREAD_TOOLS = ("mcp__threads__list_recent", "mcp__threads__move_to_thread")
 # Deny-by-default: CLI-харнес объявляет агенту множество своих инструментов
 # (ToolSearch, Cron*, SendMessage, Task* и т.п.) — всё, чего нет в этом
 # белом списке, режется гардом до выполнения.
-SAFE_TOOLS = frozenset(WRITE_TOOLS) | set(FS_TOOLS) | set(KANBAN_TOOLS) | {
-    "Read", "Grep", "Glob", "TodoWrite"}
+SAFE_TOOLS = frozenset(WRITE_TOOLS) | set(FS_TOOLS) | set(KANBAN_TOOLS) | set(
+    THREAD_TOOLS) | {"Read", "Grep", "Glob", "TodoWrite"}
+
+
+def _ru_plural(n: int, one: str, few: str, many: str) -> str:
+    """1 сообщение / 2 сообщения / 5 сообщений."""
+    n10, n100 = n % 10, n % 100
+    if n10 == 1 and n100 != 11:
+        return one
+    if 2 <= n10 <= 4 and not (12 <= n100 <= 14):
+        return few
+    return many
 
 
 def _deny(message: str) -> dict:
@@ -434,6 +445,97 @@ def _make_kanban_server():
                                         checklist_add, checklist_set])
 
 
+def _make_threads_server(chat_id: int):
+    """Наведение порядка в чате: агент раскидывает сообщения ленты по тредам
+    (плоская модель — messages.thread_root_id, один уровень, как в Slack).
+    Права не нужны — это тот же чат, где уже идёт разговор с агентом."""
+
+    def _ok(text: str) -> dict:
+        return {"content": [{"type": "text", "text": text}]}
+
+    def _err(text: str) -> dict:
+        return {"content": [{"type": "text", "text": text}], "is_error": True}
+
+    def _parse_ids(raw: str) -> list[int]:
+        ids = []
+        for tok in (raw or "").split(","):
+            tok = tok.strip().lstrip("#")
+            if not tok:
+                continue
+            if not tok.isdigit():
+                raise store.StoreError(f"не похоже на id сообщения: «{tok}»")
+            ids.append(int(tok))
+        return ids
+
+    @tool("list_recent", "Последние сообщения ЛЕНТЫ этого чата (сообщения "
+          "внутри тредов сюда не попадают) — id, автор, время и начало "
+          "текста, чтобы решить, что и куда раскидать по тредам. count — "
+          "сколько сообщений строкой, по умолчанию 50, максимум 200.",
+          {"count": str})
+    async def list_recent(args):
+        raw = (args.get("count") or "").strip()
+        try:
+            n = int(raw) if raw else 50
+        except ValueError:
+            return _err(f"count должен быть числом, получил «{raw}»")
+        n = max(1, min(200, n))
+        conn = store.connect()
+        try:
+            msgs = store.list_messages(conn, chat_id, limit=n)
+        finally:
+            conn.close()
+        if not msgs:
+            return _ok("сообщений в ленте пока нет")
+        lines = []
+        for m in msgs:
+            if m.get("deleted_at"):
+                text = "(удалено)"
+            else:
+                text = " ".join((m.get("text") or "").split()) or "(без текста)"
+                if len(text) > 120:
+                    text = text[:120] + "…"
+            hhmm = (m.get("created_at") or "")[11:16]
+            lines.append(f"[#{m['id']}] {m['author_name']} ({hhmm}): {text}")
+        return _ok("\n".join(lines))
+
+    @tool("move_to_thread", "Перенести сообщения ленты этого чата в тред "
+          "указанного корневого сообщения (сообщение остаётся видно в "
+          "ленте как корень, остальные уходят в его тред). "
+          "root_message_id — id сообщения-корня (само сообщение ленты, не "
+          "находящееся в другом треде). message_ids — id переносимых "
+          "сообщений через запятую, например «12, 13, 14» (id смотри в "
+          "list_recent). Переноси сообщения ТОЛЬКО по явной просьбе "
+          "пользователя.", {"root_message_id": str, "message_ids": str})
+    async def move_to_thread(args):
+        conn = store.connect()
+        try:
+            raw_root = (args.get("root_message_id") or "").strip().lstrip("#")
+            if not raw_root.isdigit():
+                return _err(f"root_message_id должен быть числом,"
+                            f" получил «{raw_root}»")
+            root_id = int(raw_root)
+            ids = _parse_ids(args.get("message_ids") or "")
+            if not ids:
+                return _err("не указаны message_ids")
+            root = store.messages_to_thread(conn, chat_id, root_id, ids)
+            n = len(ids)
+            store.add_message(
+                conn, chat_id, author_kind="system", author_user_id=None,
+                author_name="система",
+                text=f"агент перенёс {n} "
+                     f"{_ru_plural(n, 'сообщение', 'сообщения', 'сообщений')}"
+                     f" в тред")
+        except store.StoreError as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        return _ok(f"перенесено в тред #{root['id']}: {n}"
+                   f" {_ru_plural(n, 'сообщение', 'сообщения', 'сообщений')}")
+
+    return create_sdk_mcp_server(name="threads", version="1.0.0",
+                                 tools=[list_recent, move_to_thread])
+
+
 def _make_guards(scopes: dict, extra_read: set):
     """write_guard: только write-корни сессии; read_guard: только read-корни
     (shared + свой personal + Unity). Пути с .git режутся всегда.
@@ -534,13 +636,14 @@ class AgentSession:
             cwd=str(VAULT / "shared"),
             add_dirs=add_dirs,
             allowed_tools=["Read", "Grep", "Glob", "Edit", "Write", "TodoWrite",
-                           *FS_TOOLS, *KANBAN_TOOLS],
+                           *FS_TOOLS, *KANBAN_TOOLS, *THREAD_TOOLS],
             disallowed_tools=["Bash", "Task", "Agent", "WebSearch", "WebFetch",
                               "NotebookEdit", "ToolSearch", "SlashCommand"],
             permission_mode="acceptEdits",
             setting_sources=[],
             mcp_servers={"fs": _make_fs_server(scopes, self.extra_read),
-                         "kanban": _make_kanban_server()},
+                         "kanban": _make_kanban_server(),
+                         "threads": _make_threads_server(self.chat_id)},
             hooks={"PreToolUse": [
                 # matcher=None — на все инструменты; deny любого хука побеждает
                 HookMatcher(matcher=None, hooks=[whitelist_guard]),
