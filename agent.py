@@ -459,7 +459,9 @@ def _make_threads_server(chat_id: int):
     def _parse_ids(raw: str) -> list[int]:
         ids = []
         for tok in (raw or "").split(","):
-            tok = tok.strip().lstrip("#")
+            # id сообщений подписаны как m123 (см. prompts.channel_context);
+            # решётку и «m» принимаем и срезаем — агенту проще.
+            tok = tok.strip().lstrip("#m")
             if not tok:
                 continue
             if not tok.isdigit():
@@ -495,7 +497,9 @@ def _make_threads_server(chat_id: int):
                 if len(text) > 120:
                     text = text[:120] + "…"
             hhmm = (m.get("created_at") or "")[11:16]
-            lines.append(f"[#{m['id']}] {m['author_name']} ({hhmm}): {text}")
+            # m123, не #123: решётка в чате зарезервирована под ссылки на
+            # задачи канбана.
+            lines.append(f"[m{m['id']}] {m['author_name']} ({hhmm}): {text}")
         return _ok("\n".join(lines))
 
     @tool("move_to_thread", "Перенести сообщения ленты этого чата в тред "
@@ -509,7 +513,7 @@ def _make_threads_server(chat_id: int):
     async def move_to_thread(args):
         conn = store.connect()
         try:
-            raw_root = (args.get("root_message_id") or "").strip().lstrip("#")
+            raw_root = (args.get("root_message_id") or "").strip().lstrip("#m")
             if not raw_root.isdigit():
                 return _err(f"root_message_id должен быть числом,"
                             f" получил «{raw_root}»")

@@ -6,46 +6,61 @@
 <title>Foreman</title>
 <link rel="icon" href="favicon.svg?v=1" type="image/svg+xml">
 <script>document.documentElement.dataset.theme = localStorage.getItem("gd_theme") || "dark";</script>
+<link rel="stylesheet" href="vendor/inter/inter.css">
 <style>
 :root{
-    --bg0:#0f1115; --bg1:#171a21; --bg2:#1e222b; --bg3:#262b35;
-    --border:#2b303b; --border-strong:#3a4150;
-    --fg:#e7eaf0; --fg-dim:#9aa3b2; --fg-faint:#697180;
-    --accent:#6ea8fe; --accent-soft:rgba(110,168,254,.14);
-    --on-accent:#0c1524;
-    --red:#ef7d7d; --green:#7fc98f; --yellow:#f0c25c;
+    --bg0:#0e0f11; --bg1:#131416; --bg2:#18191c; --bg3:#1e2024; --bg4:#232529;
+    --border:#26282c; --border-strong:#34373d;
+    --fg:#f0f1f3; --fg-dim:#8f949d; --fg-faint:#62666d;
+    --accent:#5e6ad2; --accent-hover:#6e79e0; --accent-soft:rgba(94,106,210,.16);
+    --on-accent:#ffffff;
+    --red:#d0605c; --red-soft:rgba(208,96,92,.13);
+    --green:#4aa56b; --green-soft:rgba(74,165,107,.14);
+    --yellow:#c9a13d;
     --hat-soft:rgba(245,157,61,.15);
-    --shadow-1:0 1px 3px rgba(0,0,0,.35);
     --shadow-2:0 6px 22px rgba(0,0,0,.4);
     --shadow-3:0 12px 44px rgba(0,0,0,.5);
-    --radius:10px; --radius-sm:7px;
-    --nav-bg:rgba(15,17,21,.72);
-    --hero-glow:radial-gradient(ellipse 60% 45% at 50% 0%, rgba(110,168,254,.13), transparent 70%);
+    --radius:10px; --radius-sm:6px;
+    --av-1:#5e6ad2; --av-2:#4a7dab; --av-3:#3d8f85;
+    --av-4:#59935f; --av-5:#9268b5; --av-6:#ad6079;
+    --nav-bg:rgba(14,15,17,.72);
+    --hero-glow:radial-gradient(ellipse 60% 45% at 50% 0%, rgba(94,106,210,.12), transparent 70%);
+    color-scheme:dark;
 }
 [data-theme="light"]{
-    --bg0:#eef0f4; --bg1:#ffffff; --bg2:#f6f7fa; --bg3:#e9ecf1;
-    --border:#dcdfe6; --border-strong:#c2c8d2;
-    --fg:#1e232c; --fg-dim:#5c6575; --fg-faint:#8b94a5;
-    --accent:#2e6fd8; --accent-soft:rgba(46,111,216,.11);
+    --bg0:#f7f8f9; --bg1:#ffffff; --bg2:#f2f3f5; --bg3:#ebedf0; --bg4:#e4e6ea;
+    --border:#e2e4e9; --border-strong:#cbcfd6;
+    --fg:#1c1e21; --fg-dim:#676c76; --fg-faint:#9a9fa8;
+    --accent:#5560cb; --accent-hover:#4750b8; --accent-soft:rgba(85,96,203,.11);
     --on-accent:#ffffff;
-    --red:#c74f4f; --green:#2f8f5b; --yellow:#b98a1d;
+    --red:#bc4a46; --red-soft:rgba(188,74,70,.1);
+    --green:#33855a; --green-soft:rgba(51,133,90,.11);
+    --yellow:#9c7a1c;
     --hat-soft:rgba(224,123,57,.13);
-    --shadow-1:0 1px 3px rgba(25,35,55,.12);
-    --shadow-2:0 6px 22px rgba(25,35,55,.14);
-    --shadow-3:0 12px 44px rgba(25,35,55,.2);
-    --nav-bg:rgba(238,240,244,.72);
-    --hero-glow:radial-gradient(ellipse 60% 45% at 50% 0%, rgba(46,111,216,.1), transparent 70%);
+    --shadow-2:0 6px 22px rgba(28,32,44,.14);
+    --shadow-3:0 12px 44px rgba(28,32,44,.2);
+    --nav-bg:rgba(247,248,249,.72);
+    --hero-glow:radial-gradient(ellipse 60% 45% at 50% 0%, rgba(85,96,203,.09), transparent 70%);
+    color-scheme:light;
 }
 *{box-sizing:border-box}
 html{scroll-behavior:smooth}
 body{
     margin:0; background:var(--bg0); color:var(--fg);
-    font:16px/1.6 "Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    font:400 15px/1.6 "Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,sans-serif;
+    letter-spacing:-0.01em; font-feature-settings:"cv01","ss03";
     -webkit-font-smoothing:antialiased; overflow-x:hidden;
 }
-::selection{background:var(--accent); color:var(--on-accent)}
+::selection{background:var(--accent-soft)}
 a{color:var(--accent); text-decoration:none}
-.mono{font-family:"Cascadia Code",Consolas,monospace}
+.mono{font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace;letter-spacing:0}
+
+.icon{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.6;
+    stroke-linecap:round;stroke-linejoin:round;flex:none;display:inline-block;
+    vertical-align:-3px;pointer-events:none}
+.icon.sm{width:14px;height:14px}
+.icon.xs{width:12px;height:12px;vertical-align:-2px}
+.icon.lg{width:20px;height:20px}
 
 /* ---------- навигация ---------- */
 nav{
@@ -55,42 +70,45 @@ nav{
     background:var(--nav-bg); backdrop-filter:blur(14px); -webkit-backdrop-filter:blur(14px);
     border-bottom:1px solid var(--border);
 }
-.brand{display:flex; align-items:center; gap:9px; font-weight:700; font-size:15px; color:var(--fg)}
-.brand .logo{width:26px; height:26px; border-radius:8px; background:var(--hat-soft);
-    display:grid; place-items:center; font-size:14px}
+.brand{display:flex; align-items:center; gap:9px; font-weight:600; font-size:14px;
+    letter-spacing:-.015em; color:var(--fg)}
+.brand .logo{width:26px; height:26px; border-radius:var(--radius-sm); background:var(--hat-soft);
+    display:grid; place-items:center}
 nav .links{display:flex; gap:18px; margin-left:auto}
-nav .links a{color:var(--fg-dim); font-size:13.5px; transition:color .15s}
+nav .links a{color:var(--fg-dim); font-size:13px; font-weight:500; transition:color .15s}
 nav .links a:hover{color:var(--fg)}
 nav .cta{
-    background:var(--accent); color:var(--on-accent); font-weight:600; font-size:13px;
-    padding:7px 15px; border-radius:999px; transition:filter .15s;
+    background:var(--accent); color:var(--on-accent); font-weight:500; font-size:13px;
+    padding:7px 14px; border-radius:var(--radius-sm); transition:background .15s;
 }
-nav .cta:hover{filter:brightness(1.1)}
+nav .cta:hover{background:var(--accent-hover)}
 #theme-btn{
-    background:none; border:none; cursor:pointer; font-size:16px; color:var(--fg-dim);
-    padding:6px 8px; border-radius:var(--radius-sm); transition:background .15s;
+    background:none; border:none; cursor:pointer; color:var(--fg-dim);
+    width:30px; height:30px; padding:0; display:grid; place-items:center;
+    border-radius:var(--radius-sm); transition:background .15s, color .15s;
 }
-#theme-btn:hover{background:var(--bg3)}
+#theme-btn:hover{background:var(--bg3); color:var(--fg)}
 @media (max-width:800px){ nav .links{display:none} }
 
 /* ---------- общая типографика секций ---------- */
 section{padding:clamp(70px,10vw,130px) clamp(18px,5vw,48px); position:relative}
 .wrap{max-width:1060px; margin:0 auto}
 .eyebrow{
-    display:inline-block; font-size:13px; font-weight:600; letter-spacing:.12em;
+    display:inline-flex; align-items:center; gap:7px;
+    font-size:12px; font-weight:600; letter-spacing:.08em;
     text-transform:uppercase; color:var(--accent); margin-bottom:16px;
 }
 h1{
-    font-size:clamp(40px,7vw,76px); line-height:1.05; font-weight:700;
-    letter-spacing:-.025em; margin:0 0 22px;
+    font-size:clamp(38px,6.5vw,68px); line-height:1.05; font-weight:600;
+    letter-spacing:-.03em; margin:0 0 22px;
 }
 h2{
-    font-size:clamp(30px,4.4vw,48px); line-height:1.1; font-weight:700;
-    letter-spacing:-.02em; margin:0 0 18px;
+    font-size:clamp(28px,4.2vw,42px); line-height:1.12; font-weight:600;
+    letter-spacing:-.025em; margin:0 0 18px;
 }
-h3{font-size:19px; font-weight:700; margin:0 0 8px}
-.lead{font-size:clamp(17px,2.2vw,21px); color:var(--fg-dim); max-width:640px; margin:0 auto}
-.sub{font-size:16px; color:var(--fg-dim); max-width:560px}
+h3{font-size:16px; font-weight:600; letter-spacing:-.015em; margin:0 0 8px}
+.lead{font-size:clamp(16px,2vw,19px); color:var(--fg-dim); max-width:640px; margin:0 auto}
+.sub{font-size:15px; color:var(--fg-dim); max-width:560px}
 .center{text-align:center}
 .center .sub{margin-left:auto; margin-right:auto}
 .accent{color:var(--accent)}
@@ -103,21 +121,22 @@ h3{font-size:19px; font-weight:700; margin:0 0 8px}
 /* ---------- hero ---------- */
 #hero{padding-top:140px; text-align:center; background:var(--hero-glow)}
 #hero .lead{margin-bottom:36px}
-.btn-row{display:flex; gap:14px; justify-content:center; flex-wrap:wrap; margin-bottom:70px}
+.btn-row{display:flex; gap:12px; justify-content:center; flex-wrap:wrap; margin-bottom:70px}
 .btn{
-    display:inline-block; padding:13px 28px; border-radius:999px; font-size:16px; font-weight:600;
-    transition:filter .15s, background .15s;
+    display:inline-flex; align-items:center; gap:8px;
+    padding:11px 22px; border-radius:8px; font-size:15px; font-weight:500;
+    transition:background .15s, border-color .15s;
 }
 .btn.primary{background:var(--accent); color:var(--on-accent)}
-.btn.primary:hover{filter:brightness(1.1)}
+.btn.primary:hover{background:var(--accent-hover)}
 .btn.ghost{background:var(--bg2); color:var(--fg); border:1px solid var(--border)}
-.btn.ghost:hover{background:var(--bg3)}
+.btn.ghost:hover{background:var(--bg3); border-color:var(--border-strong)}
 
 /* ---------- мокапы: общее окно ---------- */
 .mk{
-    background:var(--bg1); border:1px solid var(--border); border-radius:14px;
+    background:var(--bg1); border:1px solid var(--border); border-radius:12px;
     box-shadow:var(--shadow-3); overflow:hidden; text-align:left;
-    font-size:12.5px; line-height:1.5;
+    font-size:12px; line-height:1.5; letter-spacing:-.005em;
 }
 .mk-titlebar{
     display:flex; align-items:center; gap:6px; padding:9px 14px;
@@ -132,22 +151,25 @@ h3{font-size:19px; font-weight:700; margin:0 0 8px}
 /* трёхпанельный мокап приложения */
 .mk-app{display:grid; grid-template-columns:190px 1fr 230px; min-height:430px; background:var(--bg0)}
 .mk-side{background:var(--bg1); border-right:1px solid var(--border); padding:10px 8px; overflow:hidden}
-.mk-side .mk-brand{display:flex; align-items:center; gap:7px; font-weight:700; font-size:12.5px; padding:4px 8px 10px}
-.mk-side .mk-brand span{width:22px; height:22px; border-radius:7px; background:var(--hat-soft);
-    display:grid; place-items:center; font-size:12px}
-.side-title{font-size:9.5px; text-transform:uppercase; letter-spacing:.8px; color:var(--fg-faint);
-    padding:10px 8px 4px; display:flex; justify-content:space-between}
-.side-title i{font-style:normal; color:var(--fg-faint)}
+.mk-side .mk-brand{display:flex; align-items:center; gap:7px; font-weight:600; font-size:12px; padding:4px 8px 10px}
+.mk-side .mk-brand span{width:22px; height:22px; border-radius:var(--radius-sm); background:var(--hat-soft);
+    display:grid; place-items:center}
+.side-title{font-size:10px; font-weight:500; letter-spacing:.02em; color:var(--fg-faint);
+    padding:10px 8px 4px; display:flex; justify-content:space-between; align-items:center}
+.side-title i{font-style:normal; color:var(--fg-faint); display:inline-flex}
 .chat-item{
     display:flex; align-items:center; gap:7px; padding:5px 8px; border-radius:var(--radius-sm);
     color:var(--fg-dim); white-space:nowrap;
 }
-.chat-item.active{background:var(--accent-soft); color:var(--fg); font-weight:600}
+.chat-item.active{background:var(--bg4); color:var(--fg); font-weight:500}
+.chat-item .icon{color:var(--fg-faint)}
 .chat-item .badge{
-    margin-left:auto; background:var(--accent); color:var(--on-accent); font-size:9.5px; font-weight:700;
-    border-radius:9px; padding:0 6px; line-height:15px;
+    margin-left:auto; background:var(--bg2); color:var(--fg-dim); border:1px solid var(--border-strong);
+    font-size:9.5px; font-weight:600; border-radius:999px; padding:0 6px; line-height:14px;
 }
-.chat-item .badge.red{background:var(--red); color:#fff}
+.chat-item .badge.men{background:var(--accent); border-color:var(--accent); color:var(--on-accent)}
+.mk-ava{width:18px; height:18px; border-radius:5px; flex:none; display:grid; place-items:center;
+    font-size:8.5px; font-weight:600; color:#fff}
 .presence{position:relative}
 .presence::after{
     content:""; position:absolute; right:-2px; bottom:-1px; width:6px; height:6px; border-radius:50%;
@@ -155,80 +177,94 @@ h3{font-size:19px; font-weight:700; margin:0 0 8px}
 }
 .mk-chat{display:flex; flex-direction:column; min-width:0}
 .mk-chat-head{
-    display:flex; align-items:center; gap:10px; padding:9px 14px;
-    background:var(--bg1); border-bottom:1px solid var(--border); font-weight:700; font-size:13px;
+    display:flex; align-items:center; gap:8px; padding:9px 14px;
+    background:var(--bg1); border-bottom:1px solid var(--border); font-weight:600; font-size:12px;
 }
-.mk-chat-head .st{display:flex; align-items:center; gap:6px; font-weight:400; font-size:11px; color:var(--fg-dim)}
-.pulse{width:7px; height:7px; border-radius:50%; background:var(--green); animation:pulse 1.4s infinite}
+.mk-chat-head .icon{color:var(--fg-dim)}
+.mk-chat-head .st{display:flex; align-items:center; gap:6px; font-weight:500; font-size:10.5px;
+    color:var(--green); background:var(--green-soft); border-radius:999px; padding:2px 8px}
+.pulse{width:6px; height:6px; border-radius:50%; background:var(--green); animation:pulse 1.4s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.35}}
-.mk-chat-head .tools{margin-left:auto; display:flex; gap:10px; color:var(--fg-faint); font-weight:400; font-size:12px}
+.mk-chat-head .tools{margin-left:auto; display:flex; gap:8px; align-items:center;
+    color:var(--fg-faint); font-weight:400; font-size:11px}
 .mk-msgs{flex:1; padding:12px 16px; display:flex; flex-direction:column; gap:10px; overflow:hidden}
-.day-sep{display:flex; align-items:center; gap:10px; color:var(--fg-faint); font-size:9.5px;
-    text-transform:uppercase; letter-spacing:.8px}
+.day-sep{display:flex; align-items:center; gap:10px; color:var(--fg-faint); font-size:10px; font-weight:500}
 .day-sep::before,.day-sep::after{content:""; flex:1; height:1px; background:var(--border)}
 .msg{display:flex; gap:9px; min-width:0}
 .ava{
-    width:28px; height:28px; border-radius:8px; flex:none; display:grid; place-items:center;
-    font-size:11px; font-weight:700; color:#fff;
+    width:26px; height:26px; border-radius:var(--radius-sm); flex:none; display:grid; place-items:center;
+    font-size:10px; font-weight:600; color:#fff;
 }
-.ava.agent{background:var(--accent-soft); font-size:14px}
+.ava.agent{background:var(--accent-soft); color:var(--accent);
+    border:1px solid color-mix(in srgb, var(--accent) 35%, transparent)}
 .msg .body{min-width:0; flex:1}
 .msg .head{display:flex; align-items:baseline; gap:7px}
-.msg .name{font-weight:700; font-size:12px}
+.msg .name{font-weight:600; font-size:11.5px}
+.msg .name.agent-name{color:var(--accent)}
 .msg .time{font-size:10px; color:var(--fg-faint)}
-.msg .ticks{font-size:10px; color:var(--accent)}
+.msg .ticks{color:var(--accent)}
 .msg .text{color:var(--fg); overflow-wrap:break-word}
-.msg .text .mention{background:var(--accent-soft); color:var(--accent); border-radius:4px; padding:0 4px}
+.msg .text .mention{background:var(--accent-soft); color:var(--accent); font-weight:500;
+    border-radius:4px; padding:0 4px}
 .reply-quote{
-    border-left:3px solid var(--accent); background:var(--accent-soft); border-radius:0 6px 6px 0;
-    padding:3px 9px; margin-bottom:4px; font-size:11.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    border-left:2px solid var(--accent); background:var(--bg2); border-radius:0 6px 6px 0;
+    padding:3px 9px; margin-bottom:4px; font-size:11px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
 }
 .reply-quote b{color:var(--accent)}
 .reactions{display:flex; gap:5px; margin-top:5px}
 .reaction{
-    border:1px solid var(--border); background:var(--bg2); border-radius:11px;
+    border:1px solid var(--border); background:var(--bg2); border-radius:999px;
     padding:1px 8px; font-size:11px; color:var(--fg-dim);
 }
-.reaction.mine{border-color:var(--accent); background:var(--accent-soft); color:var(--fg)}
-.thread-link{margin-top:4px; font-size:11.5px; color:var(--accent)}
+.reaction.mine{border-color:color-mix(in srgb, var(--accent) 45%, transparent);
+    background:var(--accent-soft); color:var(--fg)}
+.thread-link{margin-top:4px; font-size:11px; color:var(--accent)}
 .typing{font-size:10.5px; font-style:italic; color:var(--fg-faint); padding:0 16px 6px}
 .mk-composer{padding:0 14px 12px}
 .mk-composer .box{
     display:flex; align-items:center; gap:9px; background:var(--bg2); border:1px solid var(--border);
-    border-radius:12px; padding:9px 13px; color:var(--fg-faint);
+    border-radius:var(--radius); padding:8px 8px 8px 13px; color:var(--fg-faint);
 }
-.mk-composer .send{margin-left:auto; color:var(--accent)}
+.mk-composer .box .icon{color:var(--fg-dim)}
+.mk-composer .send{margin-left:auto; width:24px; height:24px; border-radius:5px;
+    background:var(--accent); color:var(--on-accent); display:grid; place-items:center}
 
 /* панель волта в мокапе */
 .mk-vault{background:var(--bg1); border-left:1px solid var(--border); padding:10px 12px; overflow:hidden}
-.mk-vault .vh{display:flex; align-items:center; gap:7px; font-weight:700; font-size:12.5px; padding-bottom:9px;
+.mk-vault .vh{display:flex; align-items:center; gap:7px; font-weight:600; font-size:12px; padding-bottom:9px;
     border-bottom:1px solid var(--border); margin-bottom:8px}
-.mk-vault .vh .r{margin-left:auto; color:var(--fg-faint); font-weight:400}
+.mk-vault .vh .icon{color:var(--fg-dim)}
+.mk-vault .vh .r{margin-left:auto; color:var(--fg-faint); font-weight:400; display:inline-flex; gap:6px}
 .tree{color:var(--fg-dim)}
 .tree div{padding:3px 4px; white-space:nowrap; border-radius:5px}
-.tree .lvl{margin-left:16px; border-left:1px solid var(--border); padding-left:8px}
-.tree .file.sel{background:var(--accent-soft); color:var(--fg)}
+.tree .icon{color:var(--fg-faint)}
+.tree .lvl{margin-left:14px; border-left:1px solid var(--border); padding-left:8px}
+.tree .file.sel{background:var(--bg4); color:var(--fg)}
 
 /* tool-строки и плашка хода */
 .tool-line{
-    font-family:"Cascadia Code",Consolas,monospace; font-size:10.5px; color:var(--fg-faint);
-    border-left:2px solid var(--border-strong); padding:1px 8px; margin:2px 0;
+    font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace; letter-spacing:0;
+    font-size:10.5px; color:var(--fg-dim);
+    border-left:2px solid var(--border); padding:1px 8px; margin:2px 0;
 }
+.tool-line .icon{color:var(--fg-faint)}
 .caret::after{content:"▍"; color:var(--accent); animation:blink 1s step-end infinite}
 @keyframes blink{50%{opacity:0}}
 .turn-plaque{
     background:var(--bg1); border:1px solid var(--border); border-radius:var(--radius);
-    box-shadow:var(--shadow-1); padding:9px 12px; margin-top:8px; font-size:11.5px;
+    padding:9px 12px; margin-top:8px; font-size:11px; color:var(--fg-dim);
 }
-.turn-plaque .tp-head{display:flex; align-items:center; gap:8px; flex-wrap:wrap}
-.turn-plaque .tp-files{font-family:"Cascadia Code",Consolas,monospace; font-size:10.5px; color:var(--fg-dim); margin:5px 0}
+.turn-plaque .tp-head{display:flex; align-items:center; gap:8px; flex-wrap:wrap; color:var(--fg)}
+.turn-plaque .tp-files{font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace;
+    letter-spacing:0; font-size:10.5px; color:var(--fg-dim); margin:5px 0}
 .tp-btn{
     border:1px solid var(--border); background:var(--bg2); border-radius:var(--radius-sm);
-    padding:2px 10px; font-size:10.5px; color:var(--fg-dim);
+    padding:2px 10px; font-size:10.5px; font-weight:500; color:var(--fg-dim);
 }
 .tp-btn.danger{color:var(--red)}
 .diff{
-    font-family:"Cascadia Code",Consolas,monospace; font-size:10.5px; line-height:1.6;
+    font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace; letter-spacing:0;
+    font-size:10.5px; line-height:1.6;
     background:var(--bg0); border:1px solid var(--border); border-radius:var(--radius-sm);
     padding:8px 10px; margin-top:8px; overflow-x:auto; white-space:pre;
 }
@@ -238,19 +274,23 @@ h3{font-size:19px; font-weight:700; margin:0 0 8px}
 
 /* документ волта */
 .doc{padding:14px 16px; background:var(--bg0); min-height:100%}
-.doc .path{font-family:"Cascadia Code",Consolas,monospace; font-size:10px; color:var(--fg-faint); margin-bottom:8px}
-.doc h4{font-size:16px; margin:0 0 7px}
-.doc p{margin:0 0 8px; color:var(--fg-dim); font-size:12px}
-.doc table{border-collapse:collapse; font-size:11.5px; margin:8px 0}
+.doc .path{display:flex; align-items:center; gap:8px;
+    font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace; letter-spacing:0;
+    font-size:10px; color:var(--fg-faint); margin-bottom:8px}
+.doc .path .icon{color:var(--fg-faint)}
+.doc h4{font-size:15px; font-weight:600; letter-spacing:-.015em; margin:0 0 7px}
+.doc p{margin:0 0 8px; color:var(--fg-dim); font-size:11.5px}
+.doc table{border-collapse:collapse; font-size:11px; margin:8px 0}
 .doc th,.doc td{border:1px solid var(--border); padding:3px 10px}
-.doc th{background:var(--bg2); text-align:left}
-.wikilink{color:var(--green); border-bottom:1px dashed var(--green)}
-.backlinks{margin-top:12px; padding-top:9px; border-top:1px solid var(--border); font-size:11px; color:var(--fg-faint)}
+.doc th{background:var(--bg2); text-align:left; font-weight:600; color:var(--fg-dim)}
+.wikilink{color:var(--accent); border-bottom:1px dashed color-mix(in srgb, var(--accent) 55%, transparent)}
+.backlinks{margin-top:12px; padding-top:9px; border-top:1px solid var(--border); font-size:10.5px; color:var(--fg-faint)}
 .backlinks .chip{
     display:inline-block; border:1px solid var(--border); background:var(--bg2); border-radius:999px;
-    padding:1px 9px; margin:2px 3px 0 0; color:var(--green);
+    padding:1px 9px; margin:2px 3px 0 0; color:var(--fg-dim);
 }
-.src-line{font-family:"Cascadia Code",Consolas,monospace; font-size:10.5px; color:var(--fg-faint)}
+.src-line{font-family:"JetBrains Mono","Cascadia Code",Consolas,monospace; letter-spacing:0;
+    font-size:10.5px; color:var(--fg-faint)}
 
 /* ---------- секции-фичи (текст + мокап) ---------- */
 .feature{display:grid; grid-template-columns:5fr 7fr; gap:clamp(28px,5vw,64px); align-items:center}
@@ -263,36 +303,37 @@ h3{font-size:19px; font-weight:700; margin:0 0 8px}
     .feature.flip .mock{order:2}
 }
 .feature ul{list-style:none; padding:0; margin:18px 0 0}
-.feature li{padding:5px 0 5px 26px; position:relative; color:var(--fg-dim); font-size:15px}
-.feature li::before{content:"✓"; position:absolute; left:0; color:var(--green); font-weight:700}
-.feature li b{color:var(--fg); font-weight:600}
+.feature li{padding:5px 0 5px 26px; position:relative; color:var(--fg-dim); font-size:14px}
+.feature li::before{content:"✓"; position:absolute; left:0; color:var(--green); font-weight:600}
+.feature li b{color:var(--fg); font-weight:500}
 
 /* ---------- карточки ---------- */
-.cards{display:grid; gap:18px; margin-top:44px}
+.cards{display:grid; gap:16px; margin-top:44px}
 .cards.c3{grid-template-columns:repeat(3,1fr)}
 .cards.c2{grid-template-columns:repeat(2,1fr)}
 @media (max-width:860px){ .cards.c3{grid-template-columns:1fr} .cards.c2{grid-template-columns:1fr} }
 .card{
-    background:var(--bg1); border:1px solid var(--border); border-radius:14px;
-    padding:26px 24px; box-shadow:var(--shadow-1); text-align:left;
+    background:var(--bg1); border:1px solid var(--border); border-radius:12px;
+    padding:24px 22px; text-align:left; transition:border-color .2s ease;
 }
+.card:hover{border-color:var(--border-strong)}
 .card .ico{
-    width:42px; height:42px; border-radius:11px; background:var(--accent-soft);
-    display:grid; place-items:center; font-size:20px; margin-bottom:16px;
+    width:38px; height:38px; border-radius:var(--radius); background:var(--accent-soft);
+    color:var(--accent); display:grid; place-items:center; margin-bottom:16px;
 }
-.card p{margin:0; color:var(--fg-dim); font-size:14.5px}
+.card p{margin:0; color:var(--fg-dim); font-size:13.5px}
 
 /* проблема → решение */
-.pain{display:grid; grid-template-columns:1fr 1fr; gap:18px; margin-top:44px}
+.pain{display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-top:44px}
 @media (max-width:860px){ .pain{grid-template-columns:1fr} }
-.pain .col{background:var(--bg1); border:1px solid var(--border); border-radius:14px; padding:26px 24px; text-align:left}
-.pain .col.bad{border-color:color-mix(in srgb, var(--red) 35%, var(--border))}
-.pain .col.good{border-color:color-mix(in srgb, var(--green) 35%, var(--border))}
-.pain .tag{font-size:12px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; margin-bottom:14px}
+.pain .col{background:var(--bg1); border:1px solid var(--border); border-radius:12px; padding:24px 22px; text-align:left}
+.pain .col.bad{border-color:color-mix(in srgb, var(--red) 30%, var(--border))}
+.pain .col.good{border-color:color-mix(in srgb, var(--green) 30%, var(--border))}
+.pain .tag{font-size:11px; font-weight:600; letter-spacing:.08em; text-transform:uppercase; margin-bottom:14px}
 .pain .bad .tag{color:var(--red)}
 .pain .good .tag{color:var(--green)}
 .pain ul{list-style:none; margin:0; padding:0}
-.pain li{padding:6px 0 6px 26px; position:relative; color:var(--fg-dim); font-size:15px}
+.pain li{padding:6px 0 6px 26px; position:relative; color:var(--fg-dim); font-size:14px}
 .pain .bad li::before{content:"✕"; position:absolute; left:0; color:var(--red)}
 .pain .good li::before{content:"✓"; position:absolute; left:0; color:var(--green)}
 
@@ -301,40 +342,43 @@ h3{font-size:19px; font-weight:700; margin:0 0 8px}
 @media (max-width:860px){ .ribbon{grid-template-columns:1fr} }
 .ribbon .item{
     background:var(--bg1); border:1px solid var(--border); border-radius:var(--radius);
-    padding:16px 18px; font-size:14px; color:var(--fg-dim); text-align:left;
+    padding:16px 18px; font-size:13.5px; color:var(--fg-dim); text-align:left;
 }
-.ribbon .item b{display:block; color:var(--fg); margin-bottom:3px; font-size:14.5px}
+.ribbon .item b{display:block; color:var(--fg); font-weight:600; margin-bottom:3px; font-size:13.5px}
 
 /* потенциал развития */
 .road{margin-top:48px}
 .road-group{margin-bottom:44px}
 .road-group .rg-title{
-    display:flex; align-items:center; gap:12px; font-size:14px; font-weight:700;
-    letter-spacing:.1em; text-transform:uppercase; color:var(--fg-faint); margin-bottom:20px;
+    display:flex; align-items:center; gap:12px; margin-bottom:20px;
 }
 .road-group .rg-title::after{content:""; flex:1; height:1px; background:var(--border)}
 .road-group .rg-title .pill{
-    border-radius:999px; padding:3px 12px; font-size:12px; letter-spacing:0; text-transform:none;
+    border-radius:999px; padding:3px 12px; font-size:12px; font-weight:500;
 }
 .pill.now{background:var(--accent-soft); color:var(--accent)}
-.pill.dream{background:color-mix(in srgb, var(--green) 14%, transparent); color:var(--green)}
-.chips{display:flex; flex-wrap:wrap; gap:10px}
+.pill.dream{background:var(--green-soft); color:var(--green)}
+.chips{display:flex; flex-wrap:wrap; gap:8px}
 .chips .chip{
     background:var(--bg1); border:1px solid var(--border); border-radius:999px;
-    padding:9px 18px; font-size:14px; color:var(--fg); box-shadow:var(--shadow-1);
+    padding:8px 16px; font-size:13.5px; color:var(--fg);
+    transition:border-color .15s ease;
 }
-.chips .chip span{margin-right:7px}
-.dream-cards{display:grid; grid-template-columns:repeat(3,1fr); gap:18px}
+.chips .chip:hover{border-color:var(--border-strong)}
+.dream-cards{display:grid; grid-template-columns:repeat(3,1fr); gap:16px}
 @media (max-width:860px){ .dream-cards{grid-template-columns:1fr} }
 .dream{
-    background:linear-gradient(180deg, var(--bg1), var(--bg0));
-    border:1px solid var(--border); border-radius:14px; padding:24px 22px;
-    transition:transform .25s ease, border-color .25s ease; text-align:left;
+    background:var(--bg1); border:1px solid var(--border); border-radius:12px; padding:22px 20px;
+    transition:border-color .2s ease; text-align:left;
 }
-.dream:hover{transform:translateY(-4px); border-color:var(--border-strong)}
-.dream .ico{font-size:26px; margin-bottom:12px}
-.dream h3{font-size:16.5px}
-.dream p{margin:0; font-size:13.5px; color:var(--fg-dim)}
+.dream:hover{border-color:var(--border-strong)}
+.dream .ico{
+    width:34px; height:34px; border-radius:var(--radius-sm); background:var(--bg2);
+    border:1px solid var(--border); color:var(--fg-dim);
+    display:grid; place-items:center; margin-bottom:12px;
+}
+.dream h3{font-size:15px}
+.dream p{margin:0; font-size:13px; color:var(--fg-dim)}
 
 /* финал */
 #final{text-align:center; padding-bottom:60px}
@@ -346,14 +390,51 @@ footer{
 </head>
 <body>
 
-<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><g id="hat">
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<g id="hat">
 <path fill="#f59d3d" d="M4.6 14v-1.2c0-4.6 3.3-8.3 7.4-8.3s7.4 3.7 7.4 8.3V14z"/>
 <rect x="10.55" y="5.2" width="2.9" height="8.2" rx="1.2" fill="#fbd06e"/>
 <rect x="6.9" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/>
 <rect x="15.1" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/>
 <rect x="4.2" y="14" width="15.6" height="1.7" fill="#ee7f2f"/>
 <rect x="1.8" y="15.7" width="20.4" height="2.9" rx="1.45" fill="#f59d3d"/>
-</g></defs></svg>
+</g>
+<symbol id="i-moon" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 2.5 14 9l6.5 2-6.5 2-2 6.5L10 15l-6.5-2L10 9z"/></symbol>
+<symbol id="i-hash" viewBox="0 0 24 24"><path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18"/></symbol>
+<symbol id="i-lock" viewBox="0 0 24 24"><rect x="4.5" y="11" width="15" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></symbol>
+<symbol id="i-user" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 21a7.5 7.5 0 0 1 15 0"/></symbol>
+<symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21v-4"/><path d="M8.5 3.5h7L14.5 10l2.5 3.5H7L9.5 10z"/></symbol>
+<symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></symbol>
+<symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></symbol>
+<symbol id="i-clip" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48"/></symbol>
+<symbol id="i-link" viewBox="0 0 24 24"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></symbol>
+<symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5"/><path d="m5 12 7-7 7 7"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 8 5-5 5 5M12 3v12"/></symbol>
+<symbol id="i-arrow-left" viewBox="0 0 24 24"><path d="M19 12H5"/><path d="m12 19-7-7 7-7"/></symbol>
+<symbol id="i-chevron-right" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+<symbol id="i-chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="i-file" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6M9 13h6M9 17h6"/></symbol>
+<symbol id="i-pencil" viewBox="0 0 24 24"><path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="m4 12.5 5.5 5.5L20 7"/></symbol>
+<symbol id="i-check2" viewBox="0 0 24 24"><path d="m2 13 4 4L14 9"/><path d="m10 17 8-8"/></symbol>
+<symbol id="i-x" viewBox="0 0 24 24"><path d="m6 6 12 12M18 6 6 18"/></symbol>
+<symbol id="i-stop" viewBox="0 0 24 24"><rect x="6.5" y="6.5" width="11" height="11" rx="1.5"/></symbol>
+<symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5M12 15V3"/></symbol>
+<symbol id="i-thread" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.35-4.35"/></symbol>
+<symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/></symbol>
+<symbol id="i-ban" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M5.6 5.6l12.8 12.8"/></symbol>
+<symbol id="i-undo" viewBox="0 0 24 24"><path d="M3 4v5h5"/><path d="M3.5 15a9 9 0 1 0 2-9.5L3 8"/></symbol>
+<symbol id="i-home" viewBox="0 0 24 24"><path d="m3 10.5 9-7.5 9 7.5"/><path d="M5 9.5V21h14V9.5"/><path d="M10 21v-6h4v6"/></symbol>
+<symbol id="i-zap" viewBox="0 0 24 24"><path d="M13 2 4 14h6l-1 8 9-12h-6z"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-3-6.7"/><path d="M21 3v6h-6"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M5 20v-8M12 20V5M19 20v-5"/><path d="M3 20h18"/></symbol>
+<symbol id="i-gamepad" viewBox="0 0 24 24"><rect x="2.5" y="7.5" width="19" height="9.5" rx="4.75"/><path d="M7 10.5v3.5M5.2 12.2h3.6"/><path d="M15.5 14h.01M18 11h.01" stroke-width="2.2"/></symbol>
+<symbol id="i-map" viewBox="0 0 24 24"><path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2z"/><path d="M9 4v14M15 6v14"/></symbol>
+</defs></svg>
 
 <nav>
     <a class="brand" href="#hero"><span class="logo"><svg viewBox="0 0 24 24" width="17" height="17"><use href="#hat"/></svg></span>Foreman</a>
@@ -364,7 +445,7 @@ footer{
         <a href="#security">Безопасность</a>
         <a href="#future">Развитие</a>
     </div>
-    <button id="theme-btn" title="Тема">🌓</button>
+    <button id="theme-btn" title="Тема"><svg class="icon"><use href="#i-moon"/></svg></button>
     <a class="cta" href="login">Открыть</a>
 </nav>
 
@@ -388,36 +469,38 @@ footer{
             <div class="mk-app">
                 <div class="mk-side">
                     <div class="mk-brand"><span><svg viewBox="0 0 24 24" width="14" height="14"><use href="#hat"/></svg></span>Foreman</div>
-                    <div class="side-title">Агент <i>＋</i></div>
-                    <div class="chat-item">🤖 Баланс пилы</div>
-                    <div class="chat-item">🤖 Экономика подрядов</div>
-                    <div class="side-title">Каналы <i>＋</i></div>
-                    <div class="chat-item active"># Общий</div>
-                    <div class="chat-item"># Баланс <span class="badge">3</span></div>
-                    <div class="chat-item">🔒 Прототипы <span class="badge red">@1</span></div>
+                    <div class="side-title">Агент <i><svg class="icon xs"><use href="#i-plus"/></svg></i></div>
+                    <div class="chat-item"><svg class="icon sm"><use href="#i-spark"/></svg> Баланс пилы</div>
+                    <div class="chat-item"><svg class="icon sm"><use href="#i-spark"/></svg> Экономика подрядов</div>
+                    <div class="side-title">Каналы <i><svg class="icon xs"><use href="#i-plus"/></svg></i></div>
+                    <div class="chat-item active"><svg class="icon sm"><use href="#i-hash"/></svg> Общий</div>
+                    <div class="chat-item"><svg class="icon sm"><use href="#i-hash"/></svg> Баланс <span class="badge">3</span></div>
+                    <div class="chat-item"><svg class="icon sm"><use href="#i-lock"/></svg> Прототипы <span class="badge men">@1</span></div>
                     <div class="side-title">Личные</div>
-                    <div class="chat-item">✉️ Олег ✏</div>
+                    <div class="chat-item"><span class="mk-ava presence" style="background:var(--av-4)">О</span> Олег</div>
                     <div class="side-title">Люди</div>
-                    <div class="chat-item"><span class="presence">👤</span> Марина</div>
-                    <div class="chat-item"><span class="presence">👤</span> Игорь</div>
+                    <div class="chat-item"><span class="mk-ava presence" style="background:var(--av-2)">М</span> Марина</div>
+                    <div class="chat-item"><span class="mk-ava presence" style="background:var(--av-6)">И</span> Игорь</div>
                 </div>
                 <div class="mk-chat">
-                    <div class="mk-chat-head"># Общий
-                        <div class="tools">📌 2 &nbsp;📁&nbsp; 📚</div>
+                    <div class="mk-chat-head"><svg class="icon sm"><use href="#i-hash"/></svg> Общий
+                        <div class="tools"><svg class="icon sm"><use href="#i-pin"/></svg> 2
+                            <svg class="icon sm"><use href="#i-folder"/></svg>
+                            <svg class="icon sm"><use href="#i-book"/></svg></div>
                     </div>
                     <div class="mk-msgs">
                         <div class="day-sep">Сегодня</div>
                         <div class="msg">
-                            <div class="ava" style="background:hsl(205 40% 45%)">М</div>
+                            <div class="ava" style="background:var(--av-2)">М</div>
                             <div class="body">
-                                <div class="head"><span class="name">Марина</span><span class="time">10:12</span><span class="ticks">✓✓</span></div>
+                                <div class="head"><span class="name">Марина</span><span class="time">10:12</span><span class="ticks"><svg class="icon xs"><use href="#i-check2"/></svg></span></div>
                                 <div class="text">Собрала правки по кувалде в <span class="wikilink">[[Кувалда]]</span> — гляньте таблицу урона.</div>
                                 <div class="reactions"><span class="reaction mine">👍 2</span><span class="reaction">🔥 1</span></div>
-                                <div class="thread-link">💬 3 ответа</div>
+                                <div class="thread-link"><svg class="icon xs"><use href="#i-thread"/></svg> 3 ответа</div>
                             </div>
                         </div>
                         <div class="msg">
-                            <div class="ava" style="background:hsl(120 28% 40%)">О</div>
+                            <div class="ava" style="background:var(--av-4)">О</div>
                             <div class="body">
                                 <div class="head"><span class="name">Олег</span><span class="time">10:15</span></div>
                                 <div class="reply-quote"><b>Марина</b> Собрала правки по кувалде…</div>
@@ -425,33 +508,31 @@ footer{
                             </div>
                         </div>
                         <div class="msg">
-                            <div class="ava agent">🤖</div>
+                            <div class="ava agent"><svg class="icon sm"><use href="#i-spark"/></svg></div>
                             <div class="body">
-                                <div class="head"><span class="name">Агент</span><span class="time">10:15</span></div>
-                                <div class="tool-line">🔧 Read Tools/SledgeHammer/SledgeHammerTool.cs</div>
+                                <div class="head"><span class="name agent-name">Агент</span><span class="time">10:15</span></div>
+                                <div class="tool-line"><svg class="icon xs"><use href="#i-chevron-right"/></svg> Read Tools/SledgeHammer/SledgeHammerTool.cs</div>
                                 <div class="text">Урон один на замах, множитель по материалу берётся из конфига…<br><span class="src-line">Источник: Tools/SledgeHammer/SledgeHammerTool.cs</span></div>
                             </div>
                         </div>
                     </div>
                     <div class="typing">Игорь печатает…</div>
-                    <div class="mk-composer"><div class="box">📎 &nbsp;🔗 &nbsp;Сообщение в # Общий<span class="send">➤</span></div></div>
+                    <div class="mk-composer"><div class="box"><svg class="icon sm"><use href="#i-clip"/></svg><svg class="icon sm"><use href="#i-link"/></svg>Сообщение в # Общий<span class="send"><svg class="icon sm"><use href="#i-send"/></svg></span></div></div>
                 </div>
                 <div class="mk-vault">
-                    <div class="vh">📚 Волт <span class="r">⬆ ←</span></div>
+                    <div class="vh"><svg class="icon sm"><use href="#i-book"/></svg> Волт <span class="r"><svg class="icon sm"><use href="#i-upload"/></svg><svg class="icon sm"><use href="#i-arrow-left"/></svg></span></div>
                     <div class="tree">
-                        <div>📁 shared</div>
+                        <div><svg class="icon xs"><use href="#i-chevron-down"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> shared</div>
                         <div class="lvl">
-                            <div>📁 механики</div>
+                            <div><svg class="icon xs"><use href="#i-chevron-down"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> механики</div>
                             <div class="lvl">
-                                <div class="file sel">📄 Кувалда.md</div>
-                                <div>📄 Пила.md</div>
-                                <div>📄 Пена.md</div>
+                                <div class="file sel"><svg class="icon sm"><use href="#i-file"/></svg> Кувалда.md</div>
+                                <div><svg class="icon sm"><use href="#i-file"/></svg> Пила.md</div>
+                                <div><svg class="icon sm"><use href="#i-file"/></svg> Пена.md</div>
                             </div>
-                            <div>📁 экономика</div>
-                            <div class="lvl"><div>📄 Подряды.md</div></div>
+                            <div><svg class="icon xs"><use href="#i-chevron-right"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> экономика</div>
                         </div>
-                        <div>📁 personal</div>
-                        <div class="lvl"><div>📁 oleg</div></div>
+                        <div><svg class="icon xs"><use href="#i-chevron-right"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> personal</div>
                     </div>
                 </div>
             </div>
@@ -498,17 +579,17 @@ footer{
         </div>
         <div class="cards c3 reveal">
             <div class="card">
-                <div class="ico">💬</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-thread"/></svg></div>
                 <h3>Чаты команды</h3>
                 <p>Каналы, личные сообщения, треды, реакции, закрепы, прочитанность — полноценный рабочий мессенджер уровня Slack, но внутри периметра студии.</p>
             </div>
             <div class="card">
-                <div class="ico">📚</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-book"/></svg></div>
                 <h3>Волт диздоков</h3>
                 <p>База знаний в markdown под git: вики-ссылки, обратные ссылки, история правок, редактор в браузере, импорт и экспорт Word-файлов.</p>
             </div>
             <div class="card">
-                <div class="ico">🤖</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-spark"/></svg></div>
                 <h3>ИИ-агент</h3>
                 <p>Ведёт диздоки и отвечает, как механики реально устроены в коде игры. Каждый его ход — git-коммит с diff и кнопкой отката.</p>
             </div>
@@ -525,7 +606,7 @@ footer{
             <p class="sub">Всё, к чему команда привыкла в Slack и Telegram, — и всё это связано с диздоками.</p>
             <ul>
                 <li><b>Треды и ответы</b> — любую ветку ответов можно свернуть в тред одной кнопкой</li>
-                <li><b>Прочитанность</b> — галочки ✓✓ и «кто прочитал и во сколько»</li>
+                <li><b>Прочитанность</b> — галочки и «кто прочитал и во сколько»</li>
                 <li><b>Скриншот из буфера</b> — Ctrl+V, и картинка уже в чате</li>
                 <li><b>Документ из волта</b> — прикрепляется ссылкой, открывается рядом</li>
                 <li><b>Поиск Ctrl+K</b> — сразу по сообщениям и документам</li>
@@ -536,36 +617,40 @@ footer{
             <div class="mk">
                 <div class="mk-app" style="grid-template-columns:1fr; min-height:0">
                     <div class="mk-chat">
-                        <div class="mk-chat-head"># Баланс <div class="tools">📌 2 &nbsp;📁&nbsp; 📚</div></div>
+                        <div class="mk-chat-head"><svg class="icon sm"><use href="#i-hash"/></svg> Баланс
+                            <div class="tools"><svg class="icon sm"><use href="#i-pin"/></svg> 2
+                                <svg class="icon sm"><use href="#i-folder"/></svg>
+                                <svg class="icon sm"><use href="#i-book"/></svg></div>
+                        </div>
                         <div class="mk-msgs">
                             <div class="day-sep">Сегодня</div>
                             <div class="msg">
-                                <div class="ava" style="background:hsl(28 45% 45%)">И</div>
+                                <div class="ava" style="background:var(--av-6)">И</div>
                                 <div class="body">
-                                    <div class="head"><span class="name">Игорь</span><span class="time">14:02</span><span class="ticks">✓✓</span></div>
+                                    <div class="head"><span class="name">Игорь</span><span class="time">14:02</span><span class="ticks"><svg class="icon xs"><use href="#i-check2"/></svg></span></div>
                                     <div class="text">Предлагаю поднять награду за подряд «Снос гаража» до 1200 — сейчас его никто не берёт.</div>
                                     <div class="reactions"><span class="reaction mine">👍 3</span><span class="reaction">🤔 1</span></div>
-                                    <div class="thread-link">💬 5 ответов</div>
+                                    <div class="thread-link"><svg class="icon xs"><use href="#i-thread"/></svg> 5 ответов</div>
                                 </div>
                             </div>
                             <div class="msg">
-                                <div class="ava" style="background:hsl(205 40% 45%)">М</div>
+                                <div class="ava" style="background:var(--av-2)">М</div>
                                 <div class="body">
-                                    <div class="head"><span class="name">Марина</span><span class="time">14:07</span><span class="ticks">✓✓</span></div>
+                                    <div class="head"><span class="name">Марина</span><span class="time">14:07</span><span class="ticks"><svg class="icon xs"><use href="#i-check2"/></svg></span></div>
                                     <div class="reply-quote"><b>Игорь</b> Предлагаю поднять награду за подряд…</div>
                                     <div class="text">Согласна, но тогда правим и <span class="wikilink">[[Экономика подрядов]]</span> — там таблица наград. <span class="mention">@Олег</span> глянь после обеда?</div>
                                 </div>
                             </div>
                             <div class="msg">
-                                <div class="ava" style="background:hsl(120 28% 40%)">О</div>
+                                <div class="ava" style="background:var(--av-4)">О</div>
                                 <div class="body">
-                                    <div class="head"><span class="name">Олег</span><span class="time">14:11</span><span class="ticks">✓</span></div>
-                                    <div class="text">📎 скрин_баланса.png — приложил замеры с плейтеста <i style="color:var(--fg-faint)">(изм. 14:12)</i></div>
+                                    <div class="head"><span class="name">Олег</span><span class="time">14:11</span><span class="ticks"><svg class="icon xs"><use href="#i-check"/></svg></span></div>
+                                    <div class="text"><svg class="icon xs"><use href="#i-clip"/></svg> скрин_баланса.png — приложил замеры с плейтеста <i style="color:var(--fg-faint)">(изм. 14:12)</i></div>
                                 </div>
                             </div>
                         </div>
                         <div class="typing">Марина печатает…</div>
-                        <div class="mk-composer"><div class="box">📎 &nbsp;🔗 &nbsp;Сообщение в # Баланс<span class="send">➤</span></div></div>
+                        <div class="mk-composer"><div class="box"><svg class="icon sm"><use href="#i-clip"/></svg><svg class="icon sm"><use href="#i-link"/></svg>Сообщение в # Баланс<span class="send"><svg class="icon sm"><use href="#i-send"/></svg></span></div></div>
                     </div>
                 </div>
             </div>
@@ -584,25 +669,26 @@ footer{
         <div class="mk reveal" id="ag-demo">
             <div class="mk-app" style="grid-template-columns:1fr; min-height:0">
                 <div class="mk-chat">
-                    <div class="mk-chat-head">🤖 Баланс пилы
-                        <div class="st" id="ag-state" style="visibility:hidden"><span class="pulse"></span>агент работает…&nbsp; <span style="color:var(--red)">■ остановить</span></div>
+                    <div class="mk-chat-head"><svg class="icon sm"><use href="#i-spark"/></svg> Баланс пилы
+                        <div class="st" id="ag-state" style="visibility:hidden"><span class="pulse"></span>работает</div>
+                        <div class="tools" id="ag-stop" style="visibility:hidden; color:var(--red)"><svg class="icon xs"><use href="#i-stop"/></svg> остановить</div>
                     </div>
                     <div class="mk-msgs" style="min-height:300px">
                         <div class="msg">
-                            <div class="ava" style="background:hsl(120 28% 40%)">О</div>
+                            <div class="ava" style="background:var(--av-4)">О</div>
                             <div class="body">
                                 <div class="head"><span class="name">Олег</span><span class="time">15:40</span></div>
                                 <div class="text">Обнови <span class="wikilink">[[Пила]]</span> — время распила балки теперь 2,4 секунды, проверь по коду и пересчитай таблицу.</div>
                             </div>
                         </div>
                         <div class="msg">
-                            <div class="ava agent">🤖</div>
+                            <div class="ava agent"><svg class="icon sm"><use href="#i-spark"/></svg></div>
                             <div class="body">
-                                <div class="head"><span class="name">Агент</span><span class="time">15:40</span></div>
+                                <div class="head"><span class="name agent-name">Агент</span><span class="time">15:40</span></div>
                                 <div id="ag-tools"></div>
                                 <div class="text" id="ag-text"></div>
                                 <div class="turn-plaque" id="ag-plaque" style="display:none">
-                                    <div class="tp-head">✏️ Изменено файлов: 1
+                                    <div class="tp-head"><svg class="icon xs"><use href="#i-pencil"/></svg> Изменено файлов: 1
                                         <span class="tp-btn">показать diff</span>
                                         <span class="tp-btn danger">откатить</span>
                                         <span style="margin-left:auto; color:var(--fg-faint)">$0.04</span>
@@ -622,15 +708,18 @@ footer{
         </div>
         <div class="cards c3 reveal" style="margin-top:26px">
             <div class="card" style="padding:20px">
-                <h3 style="font-size:15px">⚡ Стриминг</h3>
+                <div class="ico" style="width:32px;height:32px;margin-bottom:12px"><svg class="icon"><use href="#i-zap"/></svg></div>
+                <h3 style="font-size:14px">Стриминг</h3>
                 <p style="font-size:13px">Ответ печатается по мере генерации, видно каждый инструмент. Команда наблюдает ход агента вживую.</p>
             </div>
             <div class="card" style="padding:20px">
-                <h3 style="font-size:15px">🧵 В любом чате</h3>
+                <div class="ico" style="width:32px;height:32px;margin-bottom:12px"><svg class="icon"><use href="#i-thread"/></svg></div>
+                <h3 style="font-size:14px">В любом чате</h3>
                 <p style="font-size:13px">Личные сессии — сколько угодно, с автоназванием. В каналах зовётся через @агент и видит контекст разговора.</p>
             </div>
             <div class="card" style="padding:20px">
-                <h3 style="font-size:15px">🔁 Ничего не забывает</h3>
+                <div class="ico" style="width:32px;height:32px;margin-bottom:12px"><svg class="icon"><use href="#i-refresh"/></svg></div>
+                <h3 style="font-size:14px">Ничего не забывает</h3>
                 <p style="font-size:13px">Сессии переживают перезапуск сервера. Занят — сообщения встают в очередь; любой ход можно остановить.</p>
             </div>
         </div>
@@ -656,21 +745,21 @@ footer{
             <div class="mk">
                 <div class="mk-app" style="grid-template-columns:1fr; min-height:0">
                     <div class="mk-chat">
-                        <div class="mk-chat-head">🤖 Механика пены</div>
+                        <div class="mk-chat-head"><svg class="icon sm"><use href="#i-spark"/></svg> Механика пены</div>
                         <div class="mk-msgs">
                             <div class="msg">
-                                <div class="ava" style="background:hsl(205 40% 45%)">М</div>
+                                <div class="ava" style="background:var(--av-2)">М</div>
                                 <div class="body">
                                     <div class="head"><span class="name">Марина</span><span class="time">11:20</span></div>
                                     <div class="text">Через сколько секунд пена затвердевает и можно ли по ней ходить раньше?</div>
                                 </div>
                             </div>
                             <div class="msg">
-                                <div class="ava agent">🤖</div>
+                                <div class="ava agent"><svg class="icon sm"><use href="#i-spark"/></svg></div>
                                 <div class="body">
-                                    <div class="head"><span class="name">Агент</span><span class="time">11:21</span></div>
-                                    <div class="tool-line">🔧 Read UNITY_PROJECT_MAP.md</div>
-                                    <div class="tool-line">🔧 Grep "harden" Mechanics/Foam</div>
+                                    <div class="head"><span class="name agent-name">Агент</span><span class="time">11:21</span></div>
+                                    <div class="tool-line"><svg class="icon xs"><use href="#i-chevron-right"/></svg> Read UNITY_PROJECT_MAP.md</div>
+                                    <div class="tool-line"><svg class="icon xs"><use href="#i-chevron-right"/></svg> Grep "harden" Mechanics/Foam</div>
                                     <div class="text"><b>Коротко:</b> пена твердеет постепенно, а не разом. Пока она мягкая, персонаж проваливается; опорой становится после полного затвердевания. Время задаётся в данных, не в коде — можно менять без программиста.<br>
                                     <span class="src-line">Источник: Mechanics/Foam/FoamNetwork.cs</span></div>
                                     <div class="reactions"><span class="reaction mine">❤️ 1</span></div>
@@ -703,27 +792,30 @@ footer{
             <div class="mk">
                 <div class="mk-app" style="grid-template-columns:200px 1fr; min-height:0">
                     <div class="mk-vault" style="border-left:none; border-right:1px solid var(--border)">
-                        <div class="vh">📚 Волт <span class="r">⬆</span></div>
+                        <div class="vh"><svg class="icon sm"><use href="#i-book"/></svg> Волт <span class="r"><svg class="icon sm"><use href="#i-upload"/></svg></span></div>
                         <div class="tree">
-                            <div>📁 shared</div>
+                            <div><svg class="icon xs"><use href="#i-chevron-down"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> shared</div>
                             <div class="lvl">
-                                <div>📁 механики</div>
+                                <div><svg class="icon xs"><use href="#i-chevron-down"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> механики</div>
                                 <div class="lvl">
-                                    <div class="file sel">📄 Пила.md</div>
-                                    <div>📄 Кувалда.md</div>
-                                    <div>📄 Пена.md</div>
-                                    <div>📄 Покраска.md</div>
+                                    <div class="file sel"><svg class="icon sm"><use href="#i-file"/></svg> Пила.md</div>
+                                    <div><svg class="icon sm"><use href="#i-file"/></svg> Кувалда.md</div>
+                                    <div><svg class="icon sm"><use href="#i-file"/></svg> Пена.md</div>
+                                    <div><svg class="icon sm"><use href="#i-file"/></svg> Покраска.md</div>
                                 </div>
-                                <div>📁 экономика</div>
+                                <div><svg class="icon xs"><use href="#i-chevron-down"/></svg><svg class="icon sm"><use href="#i-folder"/></svg> экономика</div>
                                 <div class="lvl">
-                                    <div>📄 Подряды.md</div>
-                                    <div>📄 Общий банк.md</div>
+                                    <div><svg class="icon sm"><use href="#i-file"/></svg> Подряды.md</div>
+                                    <div><svg class="icon sm"><use href="#i-file"/></svg> Общий банк.md</div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div class="doc">
-                        <div class="path">shared/механики/Пила.md &nbsp;·&nbsp; 🕒 история &nbsp;⬇ docx&nbsp; ✎</div>
+                        <div class="path">shared/механики/Пила.md
+                            <svg class="icon xs"><use href="#i-clock"/></svg>
+                            <svg class="icon xs"><use href="#i-download"/></svg>
+                            <svg class="icon xs"><use href="#i-pencil"/></svg></div>
                         <h4>Пила</h4>
                         <p>Ручной инструмент для демонтажа деревянных конструкций. Работает по балкам и доскам, для бетона — <span class="wikilink">[[Кувалда]]</span>.</p>
                         <table>
@@ -733,7 +825,7 @@ footer{
                             <tr><td>Цена в магазине</td><td>350</td></tr>
                         </table>
                         <p>Выпилы учитываются в прогрессе <span class="wikilink">[[Подряды|подряда]]</span>.</p>
-                        <div class="backlinks">← Ссылаются:
+                        <div class="backlinks"><svg class="icon xs"><use href="#i-arrow-left"/></svg> Ссылаются:
                             <span class="chip">Подряды</span><span class="chip">Инструменты — обзор</span><span class="chip">Обучение</span>
                         </div>
                     </div>
@@ -753,32 +845,32 @@ footer{
         </div>
         <div class="cards c3 reveal">
             <div class="card">
-                <div class="ico">🚫</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-ban"/></svg></div>
                 <h3>Без доступа к системе</h3>
                 <p>Выполнять команды агент не может вообще: shell запрещён целиком, git-коммиты делает сам сервер.</p>
             </div>
             <div class="card">
-                <div class="ico">✅</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-check"/></svg></div>
                 <h3>Белый список инструментов</h3>
                 <p>Разрешено только чтение, поиск и правка текста. Всё остальное — веб, загрузки, подагенты — блокируется до выполнения.</p>
             </div>
             <div class="card">
-                <div class="ico">👁️</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-eye"/></svg></div>
                 <h3>Код игры — только чтение</h3>
                 <p>Исходники Unity-проекта не входят в области записи. Изменить код агент не может ни при каких условиях.</p>
             </div>
             <div class="card">
-                <div class="ico">🔒</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-lock"/></svg></div>
                 <h3>Песочница по путям</h3>
                 <p>В канале агент пишет только в общую базу, в личной сессии — ещё в папку владельца. Чужие личные папки для него не существуют.</p>
             </div>
             <div class="card">
-                <div class="ico">↩️</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-undo"/></svg></div>
                 <h3>Всё обратимо</h3>
                 <p>Каждый ход агента — git-коммит только тронутых файлов. Diff виден прямо в чате, откат — одна кнопка.</p>
             </div>
             <div class="card">
-                <div class="ico">🏠</div>
+                <div class="ico"><svg class="icon lg"><use href="#i-home"/></svg></div>
                 <h3>Всё в периметре студии</h3>
                 <p>Свой сервер, своя база, свои файлы. Одни и те же правила доступа для людей и для агента — из единого места в коде.</p>
             </div>
@@ -816,47 +908,47 @@ footer{
             <div class="road-group reveal">
                 <div class="rg-title"><span class="pill now">В планах</span></div>
                 <div class="chips">
-                    <span class="chip"><span>🧠</span>Долгая память агента между сессиями</span>
-                    <span class="chip"><span>✋</span>Очередь одобрений правок агента</span>
-                    <span class="chip"><span>👥</span>Групповые личные чаты</span>
-                    <span class="chip"><span>📱</span>Мобильная версия</span>
-                    <span class="chip"><span>📤</span>Пересылка сообщений</span>
-                    <span class="chip"><span>📄</span>Чтение Google Docs по ссылке</span>
-                    <span class="chip"><span>🎚️</span>Выбор модели под задачу</span>
-                    <span class="chip"><span>🗂️</span>Встроенный канбан задач</span>
-                    <span class="chip"><span>🔔</span>Звуковые уведомления</span>
+                    <span class="chip">Долгая память агента между сессиями</span>
+                    <span class="chip">Очередь одобрений правок агента</span>
+                    <span class="chip">Групповые личные чаты</span>
+                    <span class="chip">Мобильная версия</span>
+                    <span class="chip">Пересылка сообщений</span>
+                    <span class="chip">Чтение Google Docs по ссылке</span>
+                    <span class="chip">Выбор модели под задачу</span>
+                    <span class="chip">Встроенный канбан задач</span>
+                    <span class="chip">Звуковые уведомления</span>
                 </div>
             </div>
             <div class="road-group reveal">
                 <div class="rg-title"><span class="pill dream">Видение</span></div>
                 <div class="dream-cards">
                     <div class="dream">
-                        <div class="ico">🔍</div>
+                        <div class="ico"><svg class="icon"><use href="#i-search"/></svg></div>
                         <h3>Агент-ревьюер диздоков</h3>
                         <p>Сам сверяет документы с кодом и друг с другом: находит устаревшие цифры, противоречия между механиками и дыры в описаниях — раньше, чем их найдёт плейтест.</p>
                     </div>
                     <div class="dream">
-                        <div class="ico">📰</div>
+                        <div class="ico"><svg class="icon"><use href="#i-file"/></svg></div>
                         <h3>Дайджест изменений</h3>
                         <p>Еженедельная сводка: что поменялось в коде игры и какие диздоки пора обновить. Понедельник начинается с одного сообщения агента, а не с раскопок.</p>
                     </div>
                     <div class="dream">
-                        <div class="ico">📊</div>
+                        <div class="ico"><svg class="icon"><use href="#i-chart"/></svg></div>
                         <h3>Баланс-таблицы из кода</h3>
                         <p>Агент собирает актуальные цифры баланса прямо из данных игры в живые таблицы волта — цифры в доках перестают устаревать в принципе.</p>
                     </div>
                     <div class="dream">
-                        <div class="ico">🎮</div>
+                        <div class="ico"><svg class="icon"><use href="#i-gamepad"/></svg></div>
                         <h3>Ассистент в Unity</h3>
                         <p>Окно агента прямо в редакторе: выделил объект на сцене — получил его описание из волта и связанные механики, не выходя из движка.</p>
                     </div>
                     <div class="dream">
-                        <div class="ico">🤖</div>
+                        <div class="ico"><svg class="icon"><use href="#i-spark"/></svg></div>
                         <h3>Команда агентов</h3>
                         <p>Специализированные роли: балансировщик, нарративщик, аналитик плейтестов. Каждый со своим набором прав и своей зоной волта.</p>
                     </div>
                     <div class="dream">
-                        <div class="ico">🗺️</div>
+                        <div class="ico"><svg class="icon"><use href="#i-map"/></svg></div>
                         <h3>Аналитика базы знаний</h3>
                         <p>Карта покрытия: какие механики игры описаны, какие доки мертвы, куда никто не ссылается. Здоровье документации — на одном экране.</p>
                     </div>
@@ -896,10 +988,12 @@ const agTools = document.getElementById("ag-tools");
 const agText = document.getElementById("ag-text");
 const agPlaque = document.getElementById("ag-plaque");
 const agState = document.getElementById("ag-state");
+const agStop = document.getElementById("ag-stop");
+const TOOL_ICON = '<svg class="icon xs"><use href="#i-chevron-right"/></svg> ';
 const TOOLS = [
-    "🔧 Read shared/механики/Пила.md",
-    "🔧 Grep \"cutDuration\" Tools/Saw",
-    "🔧 Edit shared/механики/Пила.md",
+    "Read shared/механики/Пила.md",
+    "Grep \"cutDuration\" Tools/Saw",
+    "Edit shared/механики/Пила.md",
 ];
 const ANSWER = "Проверил по коду: время распила действительно 2,4 с. Обновил [[Пила]] — таблицу характеристик и производительность.";
 let agTimers = [];
@@ -908,10 +1002,11 @@ const later = (fn, ms) => agTimers.push(setTimeout(fn, ms));
 function agRun() {
     agTimers.forEach(clearTimeout); agTimers = [];
     agTools.innerHTML = ""; agText.textContent = ""; agText.classList.add("caret");
-    agPlaque.style.display = "none"; agState.style.visibility = "visible";
+    agPlaque.style.display = "none";
+    agState.style.visibility = "visible"; agStop.style.visibility = "visible";
     TOOLS.forEach((t, i) => later(() => {
         const d = document.createElement("div");
-        d.className = "tool-line"; d.textContent = t;
+        d.className = "tool-line"; d.innerHTML = TOOL_ICON + t.replace(/</g, "&lt;");
         agTools.appendChild(d);
     }, 500 + i * 800));
     const t0 = 500 + TOOLS.length * 800 + 300;
@@ -921,7 +1016,7 @@ function agRun() {
     later(() => {
         agText.classList.remove("caret");
         agPlaque.style.display = "block";
-        agState.style.visibility = "hidden";
+        agState.style.visibility = "hidden"; agStop.style.visibility = "hidden";
     }, tEnd);
     later(agRun, tEnd + 6000);
 }

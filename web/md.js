@@ -31,6 +31,12 @@ const MD = (() => {
       const meCls = (window.ME && login.toLowerCase() === window.ME.login) ? " me" : "";
       return `${pre}<span class="mention${meCls}">@${login}</span>`;
     });
+    // Ссылка на задачу канбана: #6 в чате или в описании другой задачи.
+    // Lookbehind (?<![\w&#]) — «#6» узнаётся после скобок, кавычек и
+    // markdown-разметки (агент часто пишет «(#6)», «**#6**»), но не внутри
+    // слов, HTML-сущностей (&#39;) и hex-цветов #fff (там не только цифры).
+    s = s.replace(/(?<![\w&#])#(\d+)\b/g, (m, id) =>
+      `<span class="card-link" data-card="${id}">#${id}</span>`);
     return s;
   }
 
@@ -78,3 +84,16 @@ const MD = (() => {
 
   return { render, esc, resolveRel };
 })();
+
+// Клик по ссылке на задачу (#N) — открывает доску с этой карточкой.
+// Делегирование на document: работает для любого места, где отрендерен
+// MD.render (лента, тред, панель канбана), без ручной привязки после
+// вставки HTML; к моменту клика KANBAN уже точно загружен.
+document.addEventListener("click", e => {
+  const el = e.target.closest(".card-link");
+  if (!el) return;
+  e.preventDefault();
+  // KANBAN — top-level const, в window он НЕ попадает — только typeof.
+  if (typeof KANBAN !== "undefined" && KANBAN.openCard)
+    KANBAN.openCard(+el.dataset.card);
+});

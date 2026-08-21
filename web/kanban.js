@@ -340,7 +340,30 @@ const KANBAN = (() => {
     div.dataset.id = c.id;
     fillCard(div, c);
     div.addEventListener("pointerdown", e => onPointerDown(e, div, c.id));
+    // contextmenu — событие правой кнопки, drag тут не участвует
+    // (onPointerDown уже игнорирует всё, кроме e.button === 0).
+    div.addEventListener("contextmenu", e => {
+      e.preventDefault();
+      openCardCtxMenu(e.clientX, e.clientY, c.id);
+    });
     return div;
+  }
+
+  // Правый клик по мини-карточке: id — стабильный ключ, свежие данные карточки
+  // и колонок берём из cards/data в момент клика (см. стиль onPointerUp —
+  // сама карточка node может быть отрисована по устаревшему снапшоту).
+  function openCardCtxMenu(x, y, id){
+    const cur = cards.get(id);
+    if (!cur) return;
+    const items = [{icon: ICON("chevron-right", "sm"), label: "Открыть", act: () => openPanel(id)}];
+    for (const col of data.columns){
+      if (col.key === cur.column_key) continue;
+      items.push({icon: ICON("board", "sm"), label: `В «${MD.esc(col.title)}»`,
+        act: () => patchCard(id, {column: col.key}, {column_key: col.key})});
+    }
+    items.push({icon: ICON("trash", "sm"), label: "Удалить", danger: true,
+      act: () => { if (confirm("Убрать задачу с доски?")) patchCard(id, {archived: true}); }});
+    APP.openContextMenu(x, y, items);
   }
 
   // Keyed-рендер: узлы переиспользуются, патчатся по штампу и переставляются
@@ -922,15 +945,25 @@ const KANBAN = (() => {
     };
 
     const comBox = p.querySelector("#kb-p-comments");
-    comBox.innerHTML = c.comments.map(cm => `
+    // Агент — та же иконка-«звёздочка», что и его аватар в чате
+    // (ICON("spark")), а не буква-инициал. Определяется по author_user_id
+    // (у агента NULL): имя-то у него есть — «Агент», по пустому имени
+    // его не поймать.
+    comBox.innerHTML = c.comments.map(cm => {
+      const isAgent = !cm.author_user_id;
+      const ava = isAgent
+        ? `<span class="kb-ava kb-ava-agent">${ICON("spark", "xs")}</span>`
+        : `<span class="kb-ava" style="background:${avatarColor(cm.author_name)}">${MD.esc(initials(cm.author_name))}</span>`;
+      return `
       <div class="kb-comment">
         <div class="kb-comment-head">
-          <span class="kb-ava" style="background:${avatarColor(cm.author_name || "агент")}">${MD.esc(initials(cm.author_name || "агент"))}</span>
-          <b>${MD.esc(cm.author_name || "агент")}</b>
+          ${ava}
+          <b>${MD.esc(cm.author_name || "Агент")}</b>
           <small>${fmtWhen(cm.created_at)}</small>
         </div>
         <div class="md">${MD.render(cm.text)}</div>
-      </div>`).join("") || '<i class="kb-p-none">пока нет</i>';
+      </div>`;
+    }).join("") || '<i class="kb-p-none">пока нет</i>';
     const comNew = p.querySelector("#kb-p-comment-new");
     const sendComment = async () => {
       const text = comNew.value.trim();
@@ -1048,5 +1081,13 @@ const KANBAN = (() => {
   const nav = document.getElementById("nav-kanban");
   if (nav) nav.onclick = () => (isOpen() ? close() : open());
 
-  return { open, close, isOpen, onRev, refresh };
+  // Ссылка «#N» из md.js (чат, описания карточек): открыть доску и сразу
+  // карточку. Если такой (неархивной) карточки нет — сообщить об этом.
+  async function openCard(id){
+    await open();
+    if (!cards.has(id)){ alert(`Задача #${id} не найдена (или в архиве)`); return; }
+    openPanel(id);
+  }
+
+  return { open, close, isOpen, onRev, refresh, openCard };
 })();

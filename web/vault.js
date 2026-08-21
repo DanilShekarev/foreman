@@ -169,6 +169,18 @@ const VAULT = (() => {
         f.innerHTML = ICON("file", "sm") + " " + MD.esc(n.name);
         f.title = n.path;
         f.onclick = () => openDoc(n.path);
+        // Перетаскивание в чат/тред — там своя dropzone (chat.js), которая
+        // добавляет вложение-док вместо загрузки файла с компьютера.
+        f.draggable = true;
+        f.addEventListener("dragstart", e => {
+          e.dataTransfer.setData("application/x-vault-path", n.path);
+          e.dataTransfer.setData("text/plain", n.path);
+          e.dataTransfer.effectAllowed = "copy";
+        });
+        f.addEventListener("contextmenu", e => {
+          e.preventDefault();
+          openFileCtxMenu(e.clientX, e.clientY, n);
+        });
         box.appendChild(f);
       }
     }
@@ -283,6 +295,38 @@ const VAULT = (() => {
     bindWikilinks(viewEl);
     setEditing(false);
     loadBacklinks(currentPath);
+  }
+
+  function copyText(text){
+    if (navigator.clipboard && window.isSecureContext){
+      navigator.clipboard.writeText(text);
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand("copy");
+    ta.remove();
+  }
+
+  // Правый клик по файлу в дереве. Только из действий, уже доступных в UI —
+  // «История» и «Скачать docx» требуют открытого документа (используют
+  // currentPath), поэтому сперва открывают его.
+  function openFileCtxMenu(x, y, n){
+    const items = [
+      {icon: ICON("chevron-right", "sm"), label: "Открыть", act: () => openDoc(n.path)},
+      {icon: ICON("clock", "sm"), label: "История правок",
+       act: async () => { await openDoc(n.path); showHistory(); }},
+    ];
+    if (/\.md$/i.test(n.name))
+      items.push({icon: ICON("download", "sm"), label: "Скачать docx",
+        act: async () => { await openDoc(n.path); exportDocx(); }});
+    items.push({icon: ICON("copy", "sm"), label: "Скопировать вики-ссылку",
+      act: () => copyText(`[[${n.name.replace(/\.md$/i, "")}]]`)});
+    APP.openContextMenu(x, y, items);
   }
 
   function bindWikilinks(root){

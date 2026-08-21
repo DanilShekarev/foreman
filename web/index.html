@@ -70,8 +70,7 @@
       </div>
       <div id="attach-chips"></div>
       <div id="composer-box">
-        <button id="btn-attach" title="Прикрепить файл с компьютера"><svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg></button>
-        <button id="btn-attach-doc" title="Прикрепить документ из волта"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></button>
+        <button id="btn-attach" title="Прикрепить файл с компьютера — или перетащите файл из волта"><svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg></button>
         <input id="file-input" type="file" multiple hidden>
         <textarea id="input" rows="1" placeholder="Сообщение…  @агент — позвать агента"></textarea>
         <button id="btn-send" title="Отправить (Enter)"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button>
@@ -88,16 +87,15 @@
     <div id="thread-attach-chips"></div>
     <div id="thread-composer">
       <div id="thread-mention-pop" style="display:none"></div>
-      <button id="btn-thread-attach" title="Прикрепить файл"><svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg></button>
-      <button id="btn-thread-attach-doc" title="Прикрепить документ из волта"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></button>
+      <button id="btn-thread-attach" title="Прикрепить файл — или перетащите файл из волта"><svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg></button>
       <input id="thread-file-input" type="file" multiple hidden>
       <textarea id="thread-input" rows="2" placeholder="Ответить в треде…"></textarea>
       <button id="btn-thread-send" title="Отправить"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button>
     </div>
   </aside>
 
+  <div id="vault-resizer" title="Потяните, чтобы изменить ширину"></div>
   <aside id="vault-pane">
-    <div id="vault-resizer" title="Потяните, чтобы изменить ширину"></div>
     <div id="vault-header">
       <span><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>Волт</span>
       <label class="upload-btn" title="Загрузить .md или .docx"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><input id="upload-input" type="file" accept=".md,.docx,.txt" hidden></label>

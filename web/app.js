@@ -248,8 +248,68 @@ const APP = (() => {
                     CHAT.currentId() !== c.id ? `<span class="draft-mark" title="черновик">${ICON("pencil", "xs")}</span>` : "";
       div.innerHTML = `<span>${icon}</span><span class="name">${MD.esc(c.title)}</span>${draft}${badge}`;
       div.onclick = () => selectChat(c.id);
+      div.oncontextmenu = e => { e.preventDefault(); openChatCtxMenu(e.clientX, e.clientY, c); };
       el.appendChild(div);
     }
+  }
+
+  // Правый клик по чату в сайдбаре: только из действий, уже доступных в UI
+  // (кнопка входа/выхода из канала, удаление сессии, галочка «прочитано»).
+  function openChatCtxMenu(x, y, c){
+    const items = [{icon: ICON("chevron-right", "sm"), label: "Открыть", act: () => selectChat(c.id)}];
+    if (c.kind === "channel"){
+      if (c.is_member)
+        items.push({icon: ICON("logout", "sm"), label: "Покинуть канал", act: () => leaveChannel(c)});
+      else
+        items.push({icon: ICON("plus", "sm"), label: "Вступить", act: () => joinChannel(c)});
+    }
+    if (c.kind === "agent")
+      items.push({icon: ICON("trash", "sm"), label: "Удалить сессию", danger: true,
+                  act: () => deleteAgentChat(c)});
+    if (c.unread > 0)
+      items.push({icon: ICON("check", "sm"), label: "Пометить прочитанным", act: () => markChatRead(c)});
+    openContextMenu(x, y, items);
+  }
+
+  async function joinChannel(c){
+    const r = await fetch(`api/chats/${c.id}/join`, {method: "POST"});
+    const data = await r.json().catch(() => ({}));
+    if (data.error){ alert(data.error); return; }
+    await refreshChats();
+  }
+
+  async function leaveChannel(c){
+    const r = await fetch(`api/chats/${c.id}/leave`, {method: "POST"});
+    const data = await r.json().catch(() => ({}));
+    if (data.error){ alert(data.error); return; }
+    await refreshChats();
+  }
+
+  // Как btn-del-chat в chat.js, но для произвольной (не обязательно открытой) сессии.
+  async function deleteAgentChat(c){
+    if (!confirm(`Удалить сессию «${c.title}» со всей историей?`)) return;
+    const r = await fetch(`api/chats/${c.id}`, {method: "DELETE"});
+    const data = await r.json().catch(() => ({}));
+    if (data.error){ alert(data.error); return; }
+    localStorage.removeItem("gd_draft_" + c.id);
+    if (CHAT.currentId() === c.id) afterChatDeleted();
+    else refreshChats();
+  }
+
+  // Отмечает чат прочитанным без его открытия: last_message_id неизвестен
+  // из списка чатов (там только счётчик) — берём id последнего сообщения
+  // отдельным запросом.
+  async function markChatRead(c){
+    const r = await fetch(`api/chats/${c.id}/messages?limit=1`);
+    if (!r.ok) return;
+    const data = await r.json();
+    const last = data.messages.length ? data.messages[data.messages.length - 1].id : 0;
+    if (!last) return;
+    await fetch(`api/chats/${c.id}/read`, {
+      method: "POST", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({last_message_id: last}),
+    });
+    await refreshChats();
   }
 
   function selectChat(id){
@@ -503,6 +563,15 @@ const APP = (() => {
   // ------------------------------------------------------------- волт-панель
 
   document.getElementById("btn-vault-toggle").onclick = () => {
+    // Пока открыт тред, он занимает ту же колонку сетки, что и волт —
+    // не схлопываем колонку (иначе спрятался бы и тред), только запоминаем
+    // желаемое состояние волта: применится в chat.js closeThread().
+    if (appEl.classList.contains("thread-open")){
+      const hidden = !vaultPane.classList.contains("hidden");
+      vaultPane.classList.toggle("hidden", hidden);
+      localStorage.setItem("gd_vault_hidden", hidden ? "1" : "0");
+      return;
+    }
     const hidden = appEl.classList.toggle("vault-hidden");
     vaultPane.classList.toggle("hidden", hidden);
     localStorage.setItem("gd_vault_hidden", hidden ? "1" : "0");
@@ -538,12 +607,56 @@ const APP = (() => {
   }
 
   function showVault(){
+    // Волт и тред делят третью колонку сетки — открытие документа
+    // (вики-ссылка, поиск, бэклинк) вытесняет тред, если он был открыт.
+    if (typeof CHAT !== "undefined" && CHAT.closeThread) CHAT.closeThread();
     appEl.classList.remove("vault-hidden");
     vaultPane.classList.remove("hidden");
     localStorage.setItem("gd_vault_hidden", "0");
   }
 
+  // ------------------------------------------------ контекстное меню (общее)
+  // Единый компонент для всех правых кликов в приложении — вёрстка и стили
+  // те же, что раньше жили только в chat.js (#ctx-menu/.ctx-item в style.css).
+  // items = [{icon, label, act, danger}]; header — необязательный HTML сверху
+  // (например капсула эмодзи-реакций в меню сообщения — это остаётся
+  // специфичным для чата и собирается в chat.js).
+  function ensureCtxMenu(){
+    let menu = document.getElementById("ctx-menu");
+    if (menu) return menu;
+    menu = document.createElement("div");
+    menu.id = "ctx-menu";
+    menu.style.display = "none";
+    document.body.appendChild(menu);
+    const close = () => { menu.style.display = "none"; };
+    document.addEventListener("click", close);
+    document.addEventListener("keydown", e => { if (e.key === "Escape") close(); });
+    window.addEventListener("resize", close);
+    // capture: scroll не всплывает, но фаза захвата всё равно проходит через
+    // window — так закрываем меню при скролле любой панели (лента, дерево
+    // волта, колонки канбана), не перечисляя их поимённо.
+    window.addEventListener("scroll", close, true);
+    return menu;
+  }
+
+  function openContextMenu(x, y, items, headerHtml = ""){
+    const menu = ensureCtxMenu();
+    menu.innerHTML = headerHtml + items.map((it, i) =>
+      `<div class="ctx-item${it.danger ? " danger" : ""}" data-i="${i}">
+         <span class="ci-icon">${it.icon}</span>${it.label}</div>`).join("");
+    menu.querySelectorAll(".ctx-item").forEach(el =>
+      el.onclick = () => { menu.style.display = "none"; items[+el.dataset.i].act(); });
+    // Показать скрыто, замерить, вписать в окно.
+    menu.style.visibility = "hidden";
+    menu.style.display = "block";
+    const w = menu.offsetWidth, h = menu.offsetHeight;
+    menu.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
+    menu.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
+    menu.style.visibility = "";
+    return menu;
+  }
+
   boot();
   return { refreshChats, showVault, selectChat, pickFromList, afterChatDeleted,
-           rerenderLists: renderChatLists };
+           openContextMenu, rerenderLists: renderChatLists };
 })();

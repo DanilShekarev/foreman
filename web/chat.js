@@ -22,6 +22,7 @@ const CHAT = (() => {
   let threadRoot = null;       // открытый тред: корневое сообщение
   let chatReads = [];          // кто до какого сообщения дочитал (галочки)
   let replyTo = null;          // ответ на сообщение (как в ТГ)
+  let memberIds = [];          // участники текущего чата — для сортировки @упоминаний
 
   // ------------------------------------------------------------- открытие
 
@@ -40,6 +41,7 @@ const CHAT = (() => {
     showTyping([]);
     clearReply();
     chatReads = [];
+    memberIds = [];
     lastMsgId = 0;  // id глобальные: без сброса чужой чат дал бы ложный «блип»
     histLimit = 60;
     histEnd = false;
@@ -87,6 +89,7 @@ const CHAT = (() => {
     const data = await r.json();
     histEnd = data.messages.length < histLimit;  // старее уже ничего нет
     chatReads = data.reads || [];
+    memberIds = data.member_ids || [];
     const stick = scroll || nearBottom(messagesEl);
     messagesEl.innerHTML = "";
     appendWithDaySep(messagesEl, data.messages, {});
@@ -339,7 +342,8 @@ const CHAT = (() => {
         : () => VAULT.openDoc(a.path);
       main.appendChild(card);
     }
-    if (m.turn_id && m.author_kind === "agent") attachTurn(div, m.turn_id);
+    if (m.turn_id && m.author_kind === "agent")
+      attachTurn(div, m.turn_id, m.status === "streaming");
     renderReactions(div, m);
     if (canThread && m.reply_count > 0){
       const link = document.createElement("span");
@@ -456,24 +460,6 @@ const CHAT = (() => {
 
   // ------------------------------------------------------ контекстное меню
 
-  function ensureCtxMenu(){
-    let menu = document.getElementById("ctx-menu");
-    if (menu) return menu;
-    menu = document.createElement("div");
-    menu.id = "ctx-menu";
-    menu.style.display = "none";
-    document.body.appendChild(menu);
-    const close = () => { menu.style.display = "none"; };
-    document.addEventListener("click", close);
-    document.addEventListener("keydown", e => {
-      if (e.key === "Escape") close();
-    });
-    messagesEl.addEventListener("scroll", close);
-    threadMessagesEl.addEventListener("scroll", close);
-    window.addEventListener("resize", close);
-    return menu;
-  }
-
   function copyText(text){
     if (navigator.clipboard && window.isSecureContext){
       navigator.clipboard.writeText(text);
@@ -489,8 +475,9 @@ const CHAT = (() => {
     ta.remove();
   }
 
+  // Меню сообщения — специфичная «шапка» с быстрыми реакциями сверху,
+  // сам список пунктов рисует общий компонент APP.openContextMenu.
   function openCtxMenu(x, y, m, {inThread, own, canDel, canThread, canReply}){
-    const menu = ensureCtxMenu();
     const items = [];
     if (canReply)
       items.push({icon: ICON("reply", "sm"), label: "Ответить", act: () => setReply(m)});
@@ -526,22 +513,11 @@ const CHAT = (() => {
     if (canDel)
       items.push({icon: ICON("trash", "sm"), label: "Удалить", danger: true,
                   act: () => deleteMessage(m)});
-    menu.innerHTML = `
-      <div class="ctx-emoji">${EMOJI.map(e =>
-        `<button data-e="${e}">${e}</button>`).join("")}</div>
-      ${items.map((it, i) => `<div class="ctx-item${it.danger ? " danger" : ""}"
-        data-i="${i}"><span class="ci-icon">${it.icon}</span>${it.label}</div>`).join("")}`;
+    const header = `<div class="ctx-emoji">${EMOJI.map(e =>
+      `<button data-e="${e}">${e}</button>`).join("")}</div>`;
+    const menu = APP.openContextMenu(x, y, items, header);
     menu.querySelectorAll("[data-e]").forEach(b =>
       b.onclick = () => { react(m.id, b.dataset.e); menu.style.display = "none"; });
-    menu.querySelectorAll(".ctx-item").forEach(el =>
-      el.onclick = () => { menu.style.display = "none"; items[+el.dataset.i].act(); });
-    // Показать скрыто, замерить, вписать в окно.
-    menu.style.visibility = "hidden";
-    menu.style.display = "block";
-    const w = menu.offsetWidth, h = menu.offsetHeight;
-    menu.style.left = Math.min(x, window.innerWidth - w - 8) + "px";
-    menu.style.top = Math.min(y, window.innerHeight - h - 8) + "px";
-    menu.style.visibility = "";
   }
 
   // ------------------------------------------------- правка/удаление своих
@@ -704,7 +680,10 @@ const CHAT = (() => {
     if (threadRoot) refetchThread();
   }
 
-  async function attachTurn(div, turnId){
+  // liveReload=true — сообщение перезагрузилось со статусом "streaming"
+  // (страницу открыли посреди хода агента): строки инструментов остаются
+  // развёрнутыми, как в живом стриме. Иначе ход уже завершён — сворачиваем.
+  async function attachTurn(div, turnId, liveReload = false){
     const r = await fetch(`api/turn/${turnId}`);
     if (!r.ok) return;
     const turn = await r.json();
@@ -713,7 +692,7 @@ const CHAT = (() => {
     const scroller = div.closest("#messages, #thread-messages");
     const stick = scroller && nearBottom(scroller);
     renderModelBadge(div, turn);
-    renderToolLines(div, turn.tools);
+    renderToolLines(div, turn.tools, liveReload);
     renderTurnPlaque(div, turn);
     if (stick) scroller.scrollTop = scroller.scrollHeight;
   }
@@ -734,12 +713,16 @@ const CHAT = (() => {
 
   // Строки «инструмент» при перерисовке ленты — из tools_json хода.
   // Живой стрим рисует их сам по событиям — тогда они уже в div.
-  function renderToolLines(div, tools){
+  // expanded=true — оставить развёрнутыми (перезагрузка посреди хода),
+  // иначе ход завершён и строки сразу сворачиваются в заголовок.
+  function renderToolLines(div, tools, expanded){
     if (!tools || !tools.length || div.querySelector(".tool-line")) return;
     const body = div.querySelector(".body");
     if (!body) return;
-    for (const t of tools)
-      body.parentElement.insertBefore(makeToolLine(t.name, t.input), body);
+    const main = div.querySelector(".msg-main") || div;
+    const lines = tools.map(t => makeToolLine(t.name, t.input));
+    for (const line of lines) body.parentElement.insertBefore(line, body);
+    collapseToolLines(main, lines, !expanded);
   }
 
   function makeToolLine(name, input){
@@ -749,6 +732,28 @@ const CHAT = (() => {
     el.innerHTML = `${ICON("chevron-right", "sm")} ${MD.esc(toolLabel(name))} ${MD.esc(midTrim(arg))}`;
     if (arg.length > 46) el.title = arg;  // полный путь — по ховеру
     return el;
+  }
+
+  // Оборачивает уже вставленные строки .tool-line в сворачиваемый блок с
+  // заголовком «N инструментов» — клик по заголовку разворачивает/сворачивает
+  // список. collapsed=true — сразу свёрнуто (ход завершён).
+  function collapseToolLines(main, lines, collapsed){
+    if (!lines.length) return;
+    const box = document.createElement("div");
+    box.className = "tool-lines";
+    lines[0].before(box);
+    for (const l of lines) box.appendChild(l);
+    const summary = document.createElement("div");
+    summary.className = "tool-line tool-summary";
+    box.before(summary);
+    const paint = open => {
+      const n = box.childElementCount;
+      summary.innerHTML = `${ICON(open ? "chevron-down" : "chevron-right", "sm")} ` +
+        `${n} ${plural(n, "инструмент", "инструмента", "инструментов")}`;
+      box.style.display = open ? "" : "none";
+    };
+    paint(!collapsed);
+    summary.onclick = () => paint(box.style.display === "none");
   }
 
   // Длинные пути режем ПОСЕРЕДИНЕ: хвост с именем файла — самое важное.
@@ -860,6 +865,9 @@ const CHAT = (() => {
           } else if (ev.type === "tool" && agentMain){
             agentMain.insertBefore(makeToolLine(ev.name, ev.input), agentBody);
           } else if (ev.type === "turn" && agentDiv){
+            // Ход закончен — сворачиваем строки инструментов в заголовок.
+            const toolLines = [...agentMain.querySelectorAll(".tool-line")];
+            if (toolLines.length) collapseToolLines(agentMain, toolLines, true);
             renderTurnPlaque(agentDiv, {id: ev.turn, files: ev.files || [],
                                         commit_hash: ev.commit, status: "done"});
             SOUND.agent();
@@ -949,27 +957,6 @@ const CHAT = (() => {
     }
   }
 
-  async function pickVaultDoc(list, chipsEl){
-    const r = await fetch("api/vault/tree");
-    const tree = await r.json();
-    const files = [];
-    (function walk(nodes){
-      for (const n of nodes){
-        if (n.dir) walk(n.children || []);
-        else if (/\.md$/i.test(n.name)) files.push(n);
-      }
-    })(tree);
-    APP.pickFromList("Прикрепить документ", files.map(f => ({label: f.path, value: f})),
-      f => {
-        list.push({path: f.path, title: f.name.replace(/\.md$/i, "")});
-        renderChips(chipsEl, list);
-      });
-  }
-  document.getElementById("btn-attach-doc").onclick =
-    () => pickVaultDoc(attachments, attachChips);
-  document.getElementById("btn-thread-attach-doc").onclick =
-    () => pickVaultDoc(threadAttachments, threadAttachChips);
-
   const fileInput = document.getElementById("file-input");
   document.getElementById("btn-attach").onclick = () => {
     if (!current){ alert("сначала выберите чат"); return; }
@@ -1000,18 +987,31 @@ const CHAT = (() => {
   threadInputEl.addEventListener("paste",
     pasteHandler(threadAttachments, threadAttachChips));
 
+  // Принимает и файлы с компьютера, и перетащенный из волта документ
+  // (кастомный тип application/x-vault-path — см. vault.js renderNodes):
+  // тогда вместо загрузки добавляется вложение-док, как раньше делала
+  // кнопка «прикрепить документ из волта».
   function dropzone(el, getTarget){
+    const types = e => [...e.dataTransfer.types];
     el.addEventListener("dragover", e => {
-      if (![...e.dataTransfer.types].includes("Files")) return;
+      if (!types(e).includes("Files") && !types(e).includes("application/x-vault-path")) return;
       e.preventDefault();
       el.classList.add("drag-over");
     });
     el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
     el.addEventListener("drop", e => {
       el.classList.remove("drag-over");
+      const vaultPath = e.dataTransfer.getData("application/x-vault-path");
+      const [list, chips] = getTarget();
+      if (vaultPath){
+        e.preventDefault();
+        const title = vaultPath.split("/").pop().replace(/\.md$/i, "");
+        list.push({path: vaultPath, title});
+        renderChips(chips, list);
+        return;
+      }
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
-      const [list, chips] = getTarget();
       uploadFilesTo(e.dataTransfer.files, list, chips);
     });
   }
@@ -1021,8 +1021,16 @@ const CHAT = (() => {
 
   // ------------------------------------------------------------- тред
 
+  // Тред занимает ту же колонку грида, что и волт (общая ширина --vault-w,
+  // см. style.css #app.thread-open). Если волт был скрыт — колонку нужно
+  // временно раскрыть, чтобы тред стало видно; закрытие треда возвращает
+  // скрытость по актуальному состоянию localStorage (кнопка волта в шапке
+  // остаётся кликабельной, пока тред открыт — см. app.js btn-vault-toggle).
   async function openThread(rootMsg){
     threadRoot = rootMsg;
+    const appEl = document.getElementById("app");
+    appEl.classList.remove("vault-hidden");
+    appEl.classList.add("thread-open");
     threadPane.style.display = "flex";
     await refetchThread(true);
   }
@@ -1031,6 +1039,9 @@ const CHAT = (() => {
     threadRoot = null;
     threadPane.style.display = "none";
     threadInputEl.value = "";
+    const appEl = document.getElementById("app");
+    appEl.classList.remove("thread-open");
+    if (localStorage.getItem("gd_vault_hidden") === "1") appEl.classList.add("vault-hidden");
   }
 
   async function refetchThread(scroll = false){
@@ -1076,12 +1087,22 @@ const CHAT = (() => {
   function mentionize(input, pop){
     let items = [], sel = 0;
 
+    // Участники ТЕКУЩЕГО чата (memberIds) — впереди списка, «агент» — всегда
+    // первый.
     function candidates(prefix){
-      const users = (window.USERS || []).map(u => ({login: u.login, name: u.display_name}));
-      users.unshift({login: "агент", name: "Агент"});
+      const users = (window.USERS || [])
+        .map(u => ({login: u.login, name: u.display_name, id: u.id}));
+      users.unshift({login: "агент", name: "Агент", id: 0});
       prefix = prefix.toLowerCase();
-      return users.filter(u => u.login.toLowerCase().startsWith(prefix) ||
-                               u.name.toLowerCase().startsWith(prefix)).slice(0, 6);
+      const found = users.filter(u => u.login.toLowerCase().startsWith(prefix) ||
+                                       u.name.toLowerCase().startsWith(prefix));
+      found.sort((a, b) => {
+        if (a.login === "агент") return -1;
+        if (b.login === "агент") return 1;
+        const am = memberIds.includes(a.id), bm = memberIds.includes(b.id);
+        return am === bm ? 0 : (am ? -1 : 1);
+      });
+      return found.slice(0, 6);
     }
 
     function check(){
@@ -1297,7 +1318,7 @@ const CHAT = (() => {
     }
   }
 
-  return { open, onChanges, showTyping, updateReads,
+  return { open, onChanges, showTyping, updateReads, closeThread,
            // Зов снаружи (закрытие доски задач): чат снова виден — прочитан.
            markVisible: () => { if (lastMsgId && chatVisible()) markRead(); },
            currentId: () => current && current.id };
