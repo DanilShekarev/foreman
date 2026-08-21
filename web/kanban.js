@@ -16,7 +16,6 @@ const KANBAN = (() => {
 
   const PRIO_RU = {low: "низкий", normal: "обычный",
                    high: "высокий", urgent: "срочный"};
-  const PRIO_ICON = {low: "↓", high: "↑", urgent: "‼"};
 
   let filters = {q: "", assignee: 0, labels: [], priority: "", mine: false};
   try {
@@ -41,7 +40,7 @@ const KANBAN = (() => {
     view.style.display = "none";
     view.innerHTML = `
       <div id="kb-header">
-        <span class="kb-title">📋 Задачи</span>
+        <span class="kb-title">${ICON("board")} Задачи</span>
         <div id="kb-filter">
           <input type="text" id="kb-q" placeholder="Поиск задач…">
           <button id="kb-f-mine" title="Только мои задачи">Мои</button>
@@ -56,10 +55,10 @@ const KANBAN = (() => {
             <option value="low">Низкий</option>
           </select>
           <span id="kb-f-labels"></span>
-          <button id="kb-f-reset" style="display:none" title="Сбросить фильтры">✕ сброс</button>
+          <button id="kb-f-reset" style="display:none" title="Сбросить фильтры">${ICON("x", "xs")} сброс</button>
         </div>
-        <button id="kb-labels-btn" title="Справочник меток">🏷 Метки</button>
-        <button id="kb-close" title="Закрыть">✕</button>
+        <button id="kb-labels-btn" title="Справочник меток">${ICON("tag", "sm")} Метки</button>
+        <button id="kb-close" title="Закрыть">${ICON("x")}</button>
       </div>
       <div id="kb-main">
         <div id="kb-columns"></div>
@@ -125,12 +124,12 @@ const KANBAN = (() => {
         </div>
         <div class="kb-cards"></div>
         <div class="kb-empty" style="display:none">Пока пусто</div>
-        <button class="kb-quick-btn">＋ Задача</button>
+        <button class="kb-quick-btn">${ICON("plus", "sm")} Задача</button>
         <div class="kb-quick-add" style="display:none">
           <textarea rows="2" placeholder="Заголовок задачи…"></textarea>
           <div class="kb-quick-row">
             <button class="kb-quick-ok">Добавить</button>
-            <button class="kb-quick-x">✕</button>
+            <button class="kb-quick-x">${ICON("x", "sm")}</button>
           </div>
         </div>`;
       bindQuickAdd(el, col.key);
@@ -265,10 +264,13 @@ const KANBAN = (() => {
 
   // ------------------------------------------------------------- рендер
 
+  const AVA_COLORS = ["var(--av-1)", "var(--av-2)", "var(--av-3)",
+                      "var(--av-4)", "var(--av-5)", "var(--av-6)"];
+
   function avatarColor(name){
     let h = 0;
     for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360;
-    return `hsl(${h}, 40%, 46%)`;
+    return AVA_COLORS[h % 6];
   }
 
   function initials(name){
@@ -310,15 +312,15 @@ const KANBAN = (() => {
     const badges = [];
     if (c.priority && c.priority !== "normal")
       badges.push(`<span class="kb-badge kb-prio-${c.priority}"
-        title="Приоритет: ${PRIO_RU[c.priority]}">${PRIO_ICON[c.priority]}</span>`);
+        title="Приоритет: ${PRIO_RU[c.priority]}">${PRIO_RU[c.priority]}</span>`);
     if (c.due_date)
       badges.push(`<span class="kb-badge kb-due${isOverdue(c) ? " overdue" : ""}"
-        title="Срок">⏰ ${fmtDue(c.due_date)}</span>`);
+        title="Срок">${ICON("calendar", "xs")} ${fmtDue(c.due_date)}</span>`);
     if (c.checklist_total)
       badges.push(`<span class="kb-badge${c.checklist_done === c.checklist_total ? " done" : ""}"
-        title="Чеклист">☑ ${c.checklist_done}/${c.checklist_total}</span>`);
+        title="Чеклист">${ICON("check", "xs")} ${c.checklist_done}/${c.checklist_total}</span>`);
     if (c.comments_count)
-      badges.push(`<span class="kb-badge" title="Комментарии">💬 ${c.comments_count}</span>`);
+      badges.push(`<span class="kb-badge" title="Комментарии">${ICON("thread", "xs")} ${c.comments_count}</span>`);
     const ppl = (c.assignees || []).map(a =>
       `<span class="kb-ava" title="${MD.esc(a.name)}"
          style="background:${avatarColor(a.name)}">${MD.esc(initials(a.name))}</span>`).join("");
@@ -698,7 +700,7 @@ const KANBAN = (() => {
     const colOpts = data.columns.map(x =>
       `<option value="${x.key}"${x.key === c.column_key ? " selected" : ""}>${MD.esc(x.title)}</option>`).join("");
     const prioOpts = Object.entries(PRIO_RU).map(([k, v]) =>
-      `<option value="${k}"${k === c.priority ? " selected" : ""}>${(PRIO_ICON[k] || "")} ${v}</option>`).join("");
+      `<option value="${k}"${k === c.priority ? " selected" : ""}>${v}</option>`).join("");
     const chips = (c.labels || []).map(l =>
       `<span class="kb-chip lab-${l.color}">${MD.esc(l.name)}</span>`).join("");
     const ppl = (c.assignees || []).map(a =>
@@ -708,8 +710,8 @@ const KANBAN = (() => {
       <div class="kb-p-head">
         <span class="kb-id">#${c.id}</span>
         <span style="flex:1"></span>
-        <button id="kb-p-arch" title="Убрать с доски (в архив)">🗑</button>
-        <button id="kb-p-close" title="Закрыть (Esc)">✕</button>
+        <button id="kb-p-arch" title="Убрать с доски (в архив)">${ICON("archive")}</button>
+        <button id="kb-p-close" title="Закрыть (Esc)">${ICON("x")}</button>
       </div>
       <div class="kb-p-scroll">
         <div class="kb-p-title" id="kb-p-title" title="Нажмите, чтобы переименовать">${MD.esc(c.title)}</div>
@@ -721,22 +723,22 @@ const KANBAN = (() => {
           <label>Срок
             <span class="kb-p-due">
               <input type="date" id="kb-p-due" value="${c.due_date || ""}">
-              ${c.due_date ? '<button id="kb-p-due-x" title="Снять срок">✕</button>' : ""}
+              ${c.due_date ? `<button id="kb-p-due-x" title="Снять срок">${ICON("x", "xs")}</button>` : ""}
             </span></label>
           <label>Исполнители
             <span class="kb-p-row">
               <span class="kb-people">${ppl || "<i>никого</i>"}</span>
-              <button id="kb-p-assign">＋</button>
+              <button id="kb-p-assign">${ICON("plus", "sm")}</button>
             </span></label>
           <label>Метки
             <span class="kb-p-row">
               <span>${chips || "<i>нет</i>"}</span>
-              <button id="kb-p-labels">＋</button>
+              <button id="kb-p-labels">${ICON("plus", "sm")}</button>
             </span></label>
         </div>
         <div class="kb-p-sec">
           <div class="kb-p-cap">Описание
-            <button id="kb-p-body-edit" title="Редактировать">✎</button></div>
+            <button id="kb-p-body-edit" title="Редактировать">${ICON("pencil", "sm")}</button></div>
           <div class="kb-p-body md" id="kb-p-body">${
             c.body ? MD.render(c.body) : '<i class="kb-p-none">нет описания</i>'}</div>
         </div>
@@ -745,7 +747,7 @@ const KANBAN = (() => {
           ${total ? `<div class="kb-progress"><i style="width:${pct}%"></i></div>` : ""}
           <div id="kb-p-checks"></div>
           <div class="kb-p-addline">
-            <input type="text" id="kb-p-check-new" placeholder="＋ пункт…">
+            <input type="text" id="kb-p-check-new" placeholder="Новый пункт…">
           </div>
         </div>
         <div class="kb-p-sec">
@@ -754,12 +756,13 @@ const KANBAN = (() => {
           <div class="kb-p-addline">
             <textarea id="kb-p-comment-new" rows="2"
               placeholder="Комментарий… (Ctrl+Enter — отправить)"></textarea>
-            <button id="kb-p-comment-send">➤</button>
+            <button id="kb-p-comment-send">${ICON("send", "sm")}</button>
           </div>
         </div>
         <div class="kb-p-sec">
           <div class="kb-p-cap kb-p-acts-toggle" id="kb-p-acts-cap">
-            История <small>(${c.activity.length})</small> ▸</div>
+            История <small>(${c.activity.length})</small>
+            <span class="kb-p-acts-chev">${ICON("chevron-right", "xs")}</span></div>
           <div id="kb-p-acts" style="display:none"></div>
         </div>
         <div class="kb-p-meta">создал(а) ${MD.esc(c.creator_name || "агент")}
@@ -826,7 +829,7 @@ const KANBAN = (() => {
       pop.innerHTML = labels.map(l =>
         `<label class="kb-pick"><input type="checkbox" value="${l.id}"${on.has(l.id) ? " checked" : ""}>
            <span class="kb-chip lab-${l.color}">${MD.esc(l.name)}</span></label>`).join("")
-        + `<div class="kb-pop-foot"><button id="kb-pop-manage">🏷 управлять метками</button></div>`;
+        + `<div class="kb-pop-foot"><button id="kb-pop-manage">${ICON("tag", "xs")} управлять метками</button></div>`;
       pop.addEventListener("change", async () => {
         const ids = [...pop.querySelectorAll("input:checked")].map(i => +i.value);
         mergeCard(await patchCard(c.id, {labels: ids}));
@@ -876,7 +879,7 @@ const KANBAN = (() => {
       row.innerHTML = `
         <input type="checkbox"${it.done ? " checked" : ""}>
         <span class="kb-check-text">${MD.esc(it.text)}</span>
-        <button class="kb-check-del" title="Удалить пункт">✕</button>`;
+        <button class="kb-check-del" title="Удалить пункт">${ICON("x", "xs")}</button>`;
       row.querySelector("input").onchange = async e => {
         it.done = e.target.checked ? 1 : 0;
         row.classList.toggle("done", !!it.done);
@@ -955,8 +958,8 @@ const KANBAN = (() => {
     actsCap.onclick = () => {
       const on = actsBox.style.display === "none";
       actsBox.style.display = on ? "" : "none";
-      actsCap.innerHTML = actsCap.innerHTML.replace(on ? "▸" : "▾",
-                                                    on ? "▾" : "▸");
+      actsCap.querySelector(".kb-p-acts-chev").innerHTML =
+        ICON(on ? "chevron-down" : "chevron-right", "xs");
     };
   }
 
@@ -974,14 +977,14 @@ const KANBAN = (() => {
       <div class="kb-lab-row" data-id="${l.id}">
         <input type="text" value="${MD.esc(l.name)}" maxlength="40">
         <span class="kb-swatches">${swatches(l.color, l.id)}</span>
-        <button class="kb-lab-del" title="Удалить метку">✕</button>
+        <button class="kb-lab-del" title="Удалить метку">${ICON("x", "sm")}</button>
       </div>`;
     modal.innerHTML = `
-      <h3>🏷 Метки</h3>
+      <h3>${ICON("tag")} Метки</h3>
       <div id="kb-lab-list">${labels.map(row).join("") || "<i>пока нет</i>"}</div>
       <div class="kb-lab-row kb-lab-new">
         <input type="text" id="kb-lab-new-name" placeholder="Новая метка…" maxlength="40">
-        <button id="kb-lab-add">＋</button>
+        <button id="kb-lab-add">${ICON("plus", "sm")}</button>
       </div>
       <div class="row"><button id="kb-lab-close">Готово</button></div>`;
     back.style.display = "";

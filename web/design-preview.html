@@ -1,0 +1,1001 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foreman — превью редизайна</title>
+<script>
+  document.documentElement.setAttribute("data-theme", localStorage.getItem("gd_preview_theme") || "dark");
+</script>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+/* ============ Токены ============ */
+:root {
+  --canvas: #0e0f11;
+  --panel: #131416;
+  --raised: #18191c;
+  --hover: #1e2024;
+  --active: #232529;
+
+  --border: #26282c;
+  --border-strong: #34373d;
+
+  --fg: #f0f1f3;
+  --fg-muted: #8f949d;
+  --fg-faint: #62666d;
+
+  --accent: #5e6ad2;
+  --accent-hover: #6e79e0;
+  --accent-soft: rgba(94, 106, 210, .16);
+  --on-accent: #ffffff;
+
+  --green: #4aa56b;
+  --green-soft: rgba(74, 165, 107, .14);
+  --red: #d0605c;
+  --red-soft: rgba(208, 96, 92, .13);
+  --yellow: #c9a13d;
+
+  --av-1: #5e6ad2; --av-2: #4a7dab; --av-3: #3d8f85;
+  --av-4: #59935f; --av-5: #9268b5; --av-6: #ad6079;
+
+  --shadow-pop: 0 8px 24px rgba(0, 0, 0, .45);
+
+  --r-ctl: 6px;
+  --r-card: 10px;
+
+  --fs-xs: 11px;
+  --fs-sm: 12px;
+  --fs-md: 13px;
+  --fs-lg: 15px;
+  --fs-xl: 18px;
+
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --canvas: #f7f8f9;
+  --panel: #ffffff;
+  --raised: #f2f3f5;
+  --hover: #ebedf0;
+  --active: #e4e6ea;
+
+  --border: #e2e4e9;
+  --border-strong: #cbcfd6;
+
+  --fg: #1c1e21;
+  --fg-muted: #676c76;
+  --fg-faint: #9a9fa8;
+
+  --accent: #5560cb;
+  --accent-hover: #4750b8;
+  --accent-soft: rgba(85, 96, 203, .11);
+  --on-accent: #ffffff;
+
+  --green: #33855a;
+  --green-soft: rgba(51, 133, 90, .11);
+  --red: #bc4a46;
+  --red-soft: rgba(188, 74, 70, .1);
+  --yellow: #9c7a1c;
+
+  --shadow-pop: 0 8px 24px rgba(28, 32, 44, .16);
+
+  color-scheme: light;
+}
+
+/* ============ База ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  font: 400 var(--fs-md)/1.5 "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  letter-spacing: -0.01em;
+  background: var(--canvas);
+  color: var(--fg);
+  overflow: hidden;
+  font-feature-settings: "cv01", "ss03";
+}
+
+.mono {
+  font-family: "JetBrains Mono", "Cascadia Code", Consolas, monospace;
+  letter-spacing: 0;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--fg-faint); }
+::-webkit-scrollbar-track { background: transparent; }
+
+.icon {
+  width: 16px; height: 16px;
+  stroke: currentColor; fill: none;
+  stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round;
+  flex: none; display: block;
+}
+.icon.sm { width: 14px; height: 14px; }
+
+/* ============ Кнопки ============ */
+.btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  height: 28px; padding: 0 10px;
+  font: 500 var(--fs-sm)/1 "Inter", system-ui, sans-serif;
+  letter-spacing: -0.005em;
+  color: var(--fg);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background .1s, border-color .1s, color .1s;
+  white-space: nowrap;
+}
+.btn:hover { background: var(--hover); border-color: var(--border-strong); }
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn-primary:hover { background: var(--accent-hover); border-color: var(--accent-hover); }
+
+.btn-ghost { background: transparent; border-color: transparent; color: var(--fg-muted); }
+.btn-ghost:hover { background: var(--hover); border-color: transparent; color: var(--fg); }
+
+.btn-danger { color: var(--red); }
+.btn-danger:hover { background: var(--red-soft); border-color: transparent; }
+
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 28px; height: 28px; padding: 0;
+  color: var(--fg-muted);
+  background: transparent; border: none;
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background .1s, color .1s;
+}
+.icon-btn:hover { background: var(--hover); color: var(--fg); }
+.icon-btn.danger:hover { background: var(--red-soft); color: var(--red); }
+
+select.ctl {
+  height: 26px; padding: 0 22px 0 8px;
+  font: 500 var(--fs-sm)/1 "Inter", system-ui, sans-serif;
+  color: var(--fg-muted);
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238f949d' stroke-width='2' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+}
+select.ctl:hover { border-color: var(--border-strong); color: var(--fg); }
+select.ctl option { background: var(--panel); color: var(--fg); }
+
+/* ============ Каркас ============ */
+#app {
+  display: grid;
+  grid-template-columns: 240px 1fr 380px;
+  height: 100vh;
+}
+
+/* ============ Сайдбар ============ */
+#sidebar {
+  background: var(--panel);
+  border-right: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+
+#brand {
+  display: flex; align-items: center; gap: 8px;
+  height: 52px; padding: 0 14px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+#brand .logo {
+  width: 24px; height: 24px; border-radius: var(--r-ctl);
+  background: rgba(245, 157, 61, .15);
+  display: flex; align-items: center; justify-content: center;
+}
+#brand b { font-size: var(--fs-md); font-weight: 600; letter-spacing: -0.02em; }
+#brand .ver { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-faint); }
+
+.side-head {
+  display: flex; align-items: center; gap: 2px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.side-head .me {
+  display: flex; align-items: center; gap: 8px;
+  margin-right: auto; padding-left: 2px;
+  font-weight: 500; font-size: var(--fs-sm);
+  min-width: 0;
+}
+.side-head .me .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.presence {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--green); flex: none;
+}
+
+#side-scroll { flex: 1; overflow-y: auto; padding: 6px 0 12px; }
+
+.nav-item {
+  display: flex; align-items: center; gap: 9px;
+  margin: 2px 6px; padding: 0 8px;
+  height: 30px;
+  font-size: var(--fs-md); font-weight: 500;
+  color: var(--fg-muted);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background .1s, color .1s;
+}
+.nav-item:hover { background: var(--hover); color: var(--fg); }
+.nav-item .count { margin-left: auto; font-size: var(--fs-xs); color: var(--fg-faint); font-weight: 400; }
+
+.side-section { margin-top: 14px; }
+.side-title {
+  display: flex; align-items: center;
+  padding: 0 14px 4px;
+  font-size: var(--fs-xs); font-weight: 500;
+  color: var(--fg-faint);
+  letter-spacing: .02em;
+}
+.side-title .icon-btn { width: 20px; height: 20px; margin-left: auto; }
+.side-title .icon-btn .icon { width: 13px; height: 13px; }
+
+.chat-item {
+  display: flex; align-items: center; gap: 8px;
+  margin: 1px 6px; padding: 0 8px;
+  height: 28px;
+  font-size: var(--fs-md);
+  color: var(--fg-muted);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background .1s, color .1s;
+}
+.chat-item:hover { background: var(--hover); color: var(--fg); }
+.chat-item.active { background: var(--active); color: var(--fg); font-weight: 500; }
+.chat-item .icon { width: 15px; height: 15px; color: var(--fg-faint); }
+.chat-item.active .icon { color: var(--fg-muted); }
+.chat-item .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.chat-item .dot-on { width: 7px; height: 7px; border-radius: 50%; background: var(--green); flex: none; }
+.chat-item .dot-off { width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid var(--fg-faint); flex: none; }
+
+.badge {
+  margin-left: auto; flex: none;
+  min-width: 18px; height: 17px; padding: 0 5px;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 600;
+  border-radius: 999px;
+  background: var(--raised);
+  border: 1px solid var(--border-strong);
+  color: var(--fg-muted);
+}
+.badge.mention { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+
+/* ============ Чат ============ */
+#chat-pane {
+  display: flex; flex-direction: column;
+  min-width: 0;
+  background: var(--canvas);
+}
+
+#chat-header {
+  display: flex; align-items: center; gap: 8px;
+  height: 52px; padding: 0 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  flex: none;
+}
+#chat-title {
+  display: flex; align-items: center; gap: 8px;
+  font-size: var(--fs-md); font-weight: 600;
+  letter-spacing: -0.015em;
+}
+#chat-title .icon { color: var(--accent); }
+#agent-state {
+  display: inline-flex; align-items: center; gap: 6px;
+  margin-left: 4px; padding: 3px 8px;
+  font-size: var(--fs-xs); font-weight: 500;
+  color: var(--green);
+  background: var(--green-soft);
+  border-radius: 999px;
+}
+#agent-state .pulse {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--green);
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100% { opacity: 1 } 50% { opacity: .35 } }
+
+#chat-header .spacer { flex: 1; }
+#chat-header .sep { width: 1px; height: 20px; background: var(--border); margin: 0 4px; }
+
+/* ============ Лента ============ */
+#messages {
+  flex: 1; overflow-y: auto;
+  padding: 20px 20px 8px;
+}
+.msg-col { max-width: 860px; margin: 0 auto; }
+
+.day-sep {
+  display: flex; align-items: center; gap: 12px;
+  margin: 10px 0 18px;
+  font-size: var(--fs-xs); font-weight: 500;
+  color: var(--fg-faint);
+}
+.day-sep::before, .day-sep::after {
+  content: ""; flex: 1; height: 1px; background: var(--border);
+}
+
+.msg {
+  display: flex; gap: 12px;
+  padding: 8px 12px;
+  margin: 0 -12px;
+  border-radius: var(--r-card);
+  position: relative;
+}
+.msg:hover { background: color-mix(in srgb, var(--panel) 55%, transparent); }
+
+.avatar {
+  width: 30px; height: 30px; flex: none;
+  border-radius: var(--r-ctl);
+  display: flex; align-items: center; justify-content: center;
+  font-size: var(--fs-xs); font-weight: 600;
+  color: #fff;
+  margin-top: 2px;
+}
+.avatar.agent {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+}
+.avatar.agent .icon { width: 15px; height: 15px; }
+
+.msg-body { min-width: 0; flex: 1; }
+.msg-head {
+  display: flex; align-items: baseline; gap: 8px;
+  margin-bottom: 2px;
+}
+.msg-head .author { font-weight: 600; font-size: var(--fs-md); letter-spacing: -0.01em; }
+.msg-head .author.agent-name { color: var(--accent); }
+.msg-head .time { font-size: var(--fs-xs); color: var(--fg-faint); }
+.msg-head .model-tag {
+  font-size: var(--fs-xs); color: var(--fg-faint);
+  padding: 1px 6px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+.msg-text { font-size: var(--fs-md); line-height: 1.55; color: var(--fg); }
+.msg-text p + p { margin-top: 6px; }
+.msg-text .mention {
+  color: var(--accent); font-weight: 500;
+  background: var(--accent-soft);
+  padding: 1px 4px; border-radius: 4px;
+}
+.msg-text code {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-sm);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 4px;
+}
+
+.reply-quote {
+  display: flex; flex-direction: column; gap: 1px;
+  margin: 2px 0 6px;
+  padding: 6px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--raised);
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+.reply-quote .rq-author { font-weight: 600; color: var(--accent); font-size: var(--fs-xs); }
+.reply-quote .rq-text { color: var(--fg-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.tool-block { margin: 8px 0; }
+.tool-line {
+  display: flex; align-items: center; gap: 8px;
+  padding: 3px 0;
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-sm);
+  color: var(--fg-muted);
+}
+.tool-line .icon { width: 13px; height: 13px; color: var(--fg-faint); }
+.tool-line .t-verb { color: var(--fg-faint); flex: none; }
+.tool-line .t-arg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tool-line .t-ok { color: var(--green); margin-left: auto; flex: none; }
+
+.turn-plaque {
+  display: flex; align-items: center; gap: 10px;
+  margin-top: 10px; padding: 8px 12px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  font-size: var(--fs-sm);
+  color: var(--fg-muted);
+}
+.turn-plaque .icon { color: var(--fg-faint); }
+.turn-plaque b { color: var(--fg); font-weight: 500; }
+.turn-plaque .commit {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-xs);
+  color: var(--fg-faint);
+}
+.turn-plaque .btn { margin-left: auto; }
+
+.reactions { display: flex; gap: 4px; margin-top: 6px; }
+.reaction {
+  display: inline-flex; align-items: center; gap: 5px;
+  height: 24px; padding: 0 8px;
+  font-size: var(--fs-sm);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  cursor: pointer;
+  transition: border-color .1s, background .1s;
+}
+.reaction:hover { border-color: var(--border-strong); }
+.reaction.mine { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.reaction .cnt { font-weight: 600; font-size: var(--fs-xs); color: var(--fg-muted); }
+.reaction.mine .cnt { color: var(--accent); }
+
+.msg-actions {
+  position: absolute; top: -12px; right: 12px;
+  display: none; align-items: center;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-ctl);
+  box-shadow: var(--shadow-pop);
+  padding: 2px;
+}
+.msg:hover .msg-actions { display: flex; }
+.msg-actions .icon-btn { width: 26px; height: 26px; }
+
+.ticks { display: inline-flex; margin-left: 4px; color: var(--fg-faint); vertical-align: -2px; }
+.ticks.read { color: var(--accent); }
+
+/* ============ Композер ============ */
+#composer { flex: none; padding: 8px 20px 16px; }
+#composer-box {
+  max-width: 860px; margin: 0 auto;
+  display: flex; align-items: flex-end; gap: 6px;
+  padding: 8px 8px 8px 6px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: var(--r-card);
+  transition: border-color .12s, box-shadow .12s;
+}
+#composer-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+#composer-box textarea {
+  flex: 1; resize: none; border: none; outline: none;
+  background: transparent; color: var(--fg);
+  font: 400 var(--fs-md)/1.5 "Inter", system-ui, sans-serif;
+  letter-spacing: -0.01em;
+  max-height: 160px; padding: 4px 2px;
+}
+#composer-box textarea::placeholder { color: var(--fg-faint); }
+#btn-send {
+  width: 30px; height: 30px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--accent); color: var(--on-accent);
+  border: none; border-radius: var(--r-ctl);
+  cursor: pointer;
+  transition: background .1s;
+}
+#btn-send:hover { background: var(--accent-hover); }
+#composer-hint {
+  max-width: 860px; margin: 6px auto 0;
+  font-size: var(--fs-xs); color: var(--fg-faint);
+  padding: 0 2px;
+}
+#composer-hint kbd {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: 10px;
+  background: var(--raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+
+/* ============ Волт ============ */
+#vault-pane {
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+#vault-head {
+  display: flex; align-items: center; gap: 2px;
+  height: 52px; padding: 0 12px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+}
+.crumbs {
+  display: flex; align-items: center; gap: 4px;
+  margin-right: auto;
+  font-size: var(--fs-sm);
+  color: var(--fg-faint);
+  min-width: 0; overflow: hidden;
+}
+.crumbs .icon { width: 14px; height: 14px; }
+.crumbs .c-sep { color: var(--fg-faint); flex: none; }
+.crumbs .c-cur { color: var(--fg); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+#vault-doc { flex: 1; overflow-y: auto; padding: 20px 24px 32px; }
+
+.md { font-size: var(--fs-md); line-height: 1.6; }
+.md h1 {
+  font-size: var(--fs-xl); font-weight: 600; letter-spacing: -0.02em;
+  margin: 0 0 4px;
+}
+.md .doc-meta {
+  font-size: var(--fs-xs); color: var(--fg-faint);
+  margin-bottom: 16px;
+}
+.md h2 {
+  font-size: var(--fs-lg); font-weight: 600; letter-spacing: -0.015em;
+  margin: 20px 0 8px;
+}
+.md p { margin: 8px 0; color: var(--fg); }
+.md ul { margin: 8px 0; padding-left: 20px; }
+.md li { margin: 3px 0; }
+.md .wikilink {
+  color: var(--accent); text-decoration: none;
+  border-bottom: 1px dashed color-mix(in srgb, var(--accent) 50%, transparent);
+  cursor: pointer;
+}
+.md .wikilink:hover { border-bottom-style: solid; }
+.md blockquote {
+  margin: 10px 0; padding: 8px 12px;
+  border-left: 2px solid var(--border-strong);
+  color: var(--fg-muted);
+  background: var(--raised);
+  border-radius: 0 var(--r-ctl) var(--r-ctl) 0;
+}
+.md table {
+  border-collapse: collapse;
+  margin: 10px 0; width: 100%;
+  font-size: var(--fs-sm);
+}
+.md th, .md td {
+  border: 1px solid var(--border);
+  padding: 5px 10px; text-align: left;
+}
+.md th { background: var(--raised); font-weight: 600; color: var(--fg-muted); }
+.md code {
+  font-family: "JetBrains Mono", Consolas, monospace;
+  font-size: var(--fs-sm);
+  background: var(--raised);
+  border: 1px solid var(--border);
+  padding: 1px 5px; border-radius: 4px;
+}
+
+#backlinks {
+  margin-top: 28px; padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+#backlinks .bl-title {
+  font-size: var(--fs-xs); font-weight: 500; color: var(--fg-faint);
+  letter-spacing: .02em; margin-bottom: 8px;
+}
+.bl {
+  display: flex; align-items: center; gap: 8px;
+  padding: 5px 8px; margin: 0 -8px;
+  font-size: var(--fs-sm); color: var(--fg-muted);
+  border-radius: var(--r-ctl);
+  cursor: pointer;
+}
+.bl:hover { background: var(--hover); color: var(--fg); }
+.bl .icon { width: 13px; height: 13px; color: var(--fg-faint); }
+</style>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-logo" viewBox="0 0 24 24">
+      <path d="M4 16a8 8 0 0 1 16 0" />
+      <path d="M2.5 16h19" />
+      <path d="M12 5v3" />
+      <path d="M7.5 6.8 9 9.2" />
+      <path d="M16.5 6.8 15 9.2" />
+      <path d="M4.5 16v2.2M19.5 16v2.2" />
+    </symbol>
+    <symbol id="i-search" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.35-4.35" />
+    </symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24">
+      <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+    </symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24">
+      <path d="M4 7h16M4 17h16" /><circle cx="14" cy="7" r="2.5" /><circle cx="9" cy="17" r="2.5" />
+    </symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24">
+      <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+    </symbol>
+    <symbol id="i-logout" viewBox="0 0 24 24">
+      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" /><path d="M12 2v10" />
+    </symbol>
+    <symbol id="i-board" viewBox="0 0 24 24">
+      <path d="M6 5v11M12 5v6M18 5v14" />
+    </symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24">
+      <path d="M12 5v14M5 12h14" />
+    </symbol>
+    <symbol id="i-hash" viewBox="0 0 24 24">
+      <path d="M4 9h16M4 15h16M10 3 8 21M16 3l-2 18" />
+    </symbol>
+    <symbol id="i-spark" viewBox="0 0 24 24">
+      <path d="M12 2.5 14 9l6.5 2-6.5 2-2 6.5L10 15l-6.5-2L10 9z" />
+    </symbol>
+    <symbol id="i-pin" viewBox="0 0 24 24">
+      <path d="M12 21v-4" /><path d="M8.5 3.5h7L14.5 10l2.5 3.5H7L9.5 10z" />
+    </symbol>
+    <symbol id="i-folder" viewBox="0 0 24 24">
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+    </symbol>
+    <symbol id="i-book" viewBox="0 0 24 24">
+      <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+      <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+    </symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24">
+      <path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" />
+      <path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+    </symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24">
+      <rect x="6.5" y="6.5" width="11" height="11" rx="1.5" />
+    </symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3.5 2" />
+    </symbol>
+    <symbol id="i-download" viewBox="0 0 24 24">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+      <path d="m7 10 5 5 5-5M12 15V3" />
+    </symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24">
+      <path d="M17 3a2.83 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5z" />
+    </symbol>
+    <symbol id="i-clip" viewBox="0 0 24 24">
+      <path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48" />
+    </symbol>
+    <symbol id="i-link" viewBox="0 0 24 24">
+      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+    </symbol>
+    <symbol id="i-send" viewBox="0 0 24 24">
+      <path d="M12 19V5" /><path d="m5 12 7-7 7 7" />
+    </symbol>
+    <symbol id="i-reply" viewBox="0 0 24 24">
+      <path d="m9 17-5-5 5-5" /><path d="M20 18v-2a4 4 0 0 0-4-4H4" />
+    </symbol>
+    <symbol id="i-thread" viewBox="0 0 24 24">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </symbol>
+    <symbol id="i-smile" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="9" /><path d="M8.5 14.5s1.2 1.8 3.5 1.8 3.5-1.8 3.5-1.8" />
+      <path d="M9 9.5h.01M15 9.5h.01" stroke-width="2.2" />
+    </symbol>
+    <symbol id="i-check2" viewBox="0 0 24 24">
+      <path d="m2 13 4 4L14 9" /><path d="m10 17 8-8" />
+    </symbol>
+    <symbol id="i-file" viewBox="0 0 24 24">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <path d="M14 2v6h6M9 13h6M9 17h6" />
+    </symbol>
+    <symbol id="i-commit" viewBox="0 0 24 24">
+      <circle cx="12" cy="12" r="3.5" /><path d="M12 2.5v6M12 15.5v6" />
+    </symbol>
+    <symbol id="i-grep" viewBox="0 0 24 24">
+      <circle cx="11" cy="11" r="7" /><path d="m21 21-4.35-4.35" /><path d="M8.5 11h5" />
+    </symbol>
+  </defs>
+</svg>
+
+<div id="app">
+
+  <!-- ======== Сайдбар ======== -->
+  <aside id="sidebar">
+    <div id="brand">
+      <span class="logo"><svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true"><path fill="#f59d3d" d="M4.6 14v-1.2c0-4.6 3.3-8.3 7.4-8.3s7.4 3.7 7.4 8.3V14z"/><rect x="10.55" y="5.2" width="2.9" height="8.2" rx="1.2" fill="#fbd06e"/><rect x="6.9" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="15.1" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="4.2" y="14" width="15.6" height="1.7" fill="#ee7f2f"/><rect x="1.8" y="15.7" width="20.4" height="2.9" rx="1.45" fill="#f59d3d"/></svg></span>
+      <b>Foreman</b>
+      <span class="ver">превью</span>
+    </div>
+
+    <div class="side-head">
+      <span class="me">
+        <span class="presence"></span>
+        <span class="name">Данила</span>
+      </span>
+      <button class="icon-btn" title="Поиск · Ctrl+K"><svg class="icon"><use href="#i-search"/></svg></button>
+      <button class="icon-btn" title="Уведомления"><svg class="icon"><use href="#i-bell"/></svg></button>
+      <button class="icon-btn" id="btn-theme" title="Тема"><svg class="icon"><use href="#i-moon"/></svg></button>
+      <button class="icon-btn" title="Администрирование"><svg class="icon"><use href="#i-sliders"/></svg></button>
+      <button class="icon-btn" title="Выйти"><svg class="icon"><use href="#i-logout"/></svg></button>
+    </div>
+
+    <div id="side-scroll">
+      <div class="nav-item" style="margin-top:6px">
+        <svg class="icon"><use href="#i-board"/></svg>
+        Задачи
+        <span class="count">14</span>
+      </div>
+
+      <div class="side-section">
+        <div class="side-title">
+          Агент
+          <button class="icon-btn" title="Новая сессия"><svg class="icon"><use href="#i-plus"/></svg></button>
+        </div>
+        <div class="chat-item active">
+          <svg class="icon"><use href="#i-spark"/></svg>
+          <span class="label">Баланс пилы</span>
+        </div>
+        <div class="chat-item">
+          <svg class="icon"><use href="#i-spark"/></svg>
+          <span class="label">Контракты: экономика</span>
+        </div>
+        <div class="chat-item">
+          <svg class="icon"><use href="#i-spark"/></svg>
+          <span class="label">Ревизия квестов хаба</span>
+        </div>
+      </div>
+
+      <div class="side-section">
+        <div class="side-title">Каналы</div>
+        <div class="chat-item">
+          <svg class="icon"><use href="#i-hash"/></svg>
+          <span class="label">Общий</span>
+          <span class="badge">3</span>
+        </div>
+        <div class="chat-item">
+          <svg class="icon"><use href="#i-hash"/></svg>
+          <span class="label">Механики</span>
+          <span class="badge mention">@2</span>
+        </div>
+        <div class="chat-item">
+          <svg class="icon"><use href="#i-hash"/></svg>
+          <span class="label">Арт и звук</span>
+        </div>
+      </div>
+
+      <div class="side-section">
+        <div class="side-title">Личные</div>
+        <div class="chat-item">
+          <span class="dot-on"></span>
+          <span class="label">Оля Кравец</span>
+          <span class="badge">1</span>
+        </div>
+        <div class="chat-item">
+          <span class="dot-off"></span>
+          <span class="label">Сергей Мишин</span>
+        </div>
+      </div>
+
+      <div class="side-section">
+        <div class="side-title">Люди</div>
+        <div class="chat-item"><span class="dot-on"></span><span class="label">Оля Кравец</span></div>
+        <div class="chat-item"><span class="dot-on"></span><span class="label">Паша Гордеев</span></div>
+        <div class="chat-item"><span class="dot-off"></span><span class="label">Сергей Мишин</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ======== Чат ======== -->
+  <main id="chat-pane">
+    <header id="chat-header">
+      <span id="chat-title">
+        <svg class="icon"><use href="#i-spark"/></svg>
+        Баланс пилы
+      </span>
+      <span id="agent-state"><span class="pulse"></span>работает</span>
+      <span class="spacer"></span>
+      <select class="ctl" title="Модель">
+        <option>Opus 4.5</option>
+        <option>Sonnet 4.5</option>
+      </select>
+      <button class="btn btn-ghost"><svg class="icon sm"><use href="#i-stop"/></svg>Остановить</button>
+      <span class="sep"></span>
+      <button class="icon-btn" title="Закреплённые"><svg class="icon"><use href="#i-pin"/></svg></button>
+      <button class="icon-btn" title="Файлы чата"><svg class="icon"><use href="#i-folder"/></svg></button>
+      <button class="icon-btn" title="Волт"><svg class="icon"><use href="#i-book"/></svg></button>
+      <button class="icon-btn danger" title="Удалить чат"><svg class="icon"><use href="#i-trash"/></svg></button>
+    </header>
+
+    <div id="messages">
+      <div class="msg-col">
+
+        <div class="day-sep">Сегодня</div>
+
+        <div class="msg">
+          <div class="avatar" style="background:var(--av-2)">ДШ</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="author">Данила</span>
+              <span class="time">14:02</span>
+            </div>
+            <div class="msg-text">
+              <p>Посмотри, пожалуйста, насколько текущий урон пилы в коде совпадает
+              с тем, что у нас записано в диздоке <code>Механики/Инструменты/Пила.md</code>.
+              Кажется, после последнего патча цифры разъехались.</p>
+            </div>
+          </div>
+          <div class="msg-actions">
+            <button class="icon-btn" title="Ответить"><svg class="icon"><use href="#i-reply"/></svg></button>
+            <button class="icon-btn" title="В тред"><svg class="icon"><use href="#i-thread"/></svg></button>
+            <button class="icon-btn" title="Реакция"><svg class="icon"><use href="#i-smile"/></svg></button>
+            <button class="icon-btn" title="Закрепить"><svg class="icon"><use href="#i-pin"/></svg></button>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar agent"><svg class="icon"><use href="#i-spark"/></svg></div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="author agent-name">Агент</span>
+              <span class="time">14:02</span>
+              <span class="model-tag">Opus 4.5</span>
+            </div>
+            <div class="msg-text">
+              <p>Проверяю. Сначала посмотрю реализацию пилы в Unity-проекте,
+              потом сверю с диздоком.</p>
+            </div>
+            <div class="tool-block">
+              <div class="tool-line">
+                <svg class="icon"><use href="#i-file"/></svg>
+                <span class="t-verb">Read</span>
+                <span class="t-arg">Scripts/Runtime/Tools/Saw.cs</span>
+                <span class="t-ok">✓</span>
+              </div>
+              <div class="tool-line">
+                <svg class="icon"><use href="#i-grep"/></svg>
+                <span class="t-verb">Grep</span>
+                <span class="t-arg">"sawDamagePerTick" — Scripts/Runtime/Configs/</span>
+                <span class="t-ok">✓</span>
+              </div>
+              <div class="tool-line">
+                <svg class="icon"><use href="#i-file"/></svg>
+                <span class="t-verb">Read</span>
+                <span class="t-arg">vault/Механики/Инструменты/Пила.md</span>
+                <span class="t-ok">✓</span>
+              </div>
+            </div>
+            <div class="msg-text">
+              <p>Расхождение подтверждаю. В <code>SawConfig.asset</code> урон за тик — <b>14</b>,
+              интервал тика — <b>0,25 с</b> (то есть 56 DPS). В диздоке записано 40 DPS
+              и старый интервал 0,35 с. Судя по истории, конфиг подняли в патче 0.9.4,
+              а документ не обновили. Обновил таблицу характеристик в диздоке и добавил
+              пометку о причине изменения.</p>
+            </div>
+            <div class="turn-plaque">
+              <svg class="icon"><use href="#i-commit"/></svg>
+              <span><b>Ход завершён</b> · изменён 1 файл · <span class="commit">a3f19c2</span></span>
+              <button class="btn">Показать diff</button>
+            </div>
+            <div class="reactions">
+              <span class="reaction mine">👍 <span class="cnt">2</span></span>
+              <span class="reaction">🔥 <span class="cnt">1</span></span>
+            </div>
+          </div>
+          <div class="msg-actions">
+            <button class="icon-btn" title="Ответить"><svg class="icon"><use href="#i-reply"/></svg></button>
+            <button class="icon-btn" title="В тред"><svg class="icon"><use href="#i-thread"/></svg></button>
+            <button class="icon-btn" title="Реакция"><svg class="icon"><use href="#i-smile"/></svg></button>
+            <button class="icon-btn" title="Закрепить"><svg class="icon"><use href="#i-pin"/></svg></button>
+          </div>
+        </div>
+
+        <div class="msg">
+          <div class="avatar" style="background:var(--av-2)">ДШ</div>
+          <div class="msg-body">
+            <div class="msg-head">
+              <span class="author">Данила</span>
+              <span class="time">14:07</span>
+            </div>
+            <div class="reply-quote">
+              <span class="rq-author">Агент</span>
+              <span class="rq-text">Расхождение подтверждаю. В SawConfig.asset урон за тик — 14…</span>
+            </div>
+            <div class="msg-text">
+              <p>Отлично. <span class="mention">@Оля</span>, глянь потом diff — если 56 DPS
+              осознанно, надо ещё таблицу прочности балок пересчитать.
+              <span class="ticks read">
+                <svg class="icon sm"><use href="#i-check2"/></svg>
+              </span></p>
+            </div>
+          </div>
+          <div class="msg-actions">
+            <button class="icon-btn" title="Ответить"><svg class="icon"><use href="#i-reply"/></svg></button>
+            <button class="icon-btn" title="В тред"><svg class="icon"><use href="#i-thread"/></svg></button>
+            <button class="icon-btn" title="Реакция"><svg class="icon"><use href="#i-smile"/></svg></button>
+            <button class="icon-btn" title="Закрепить"><svg class="icon"><use href="#i-pin"/></svg></button>
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div id="composer">
+      <div id="composer-box">
+        <button class="icon-btn" title="Прикрепить файл"><svg class="icon"><use href="#i-clip"/></svg></button>
+        <button class="icon-btn" title="Документ из волта"><svg class="icon"><use href="#i-link"/></svg></button>
+        <textarea rows="1" placeholder="Написать агенту…"></textarea>
+        <button id="btn-send" title="Отправить"><svg class="icon"><use href="#i-send"/></svg></button>
+      </div>
+      <div id="composer-hint"><kbd>Enter</kbd> — отправить · <kbd>Shift+Enter</kbd> — новая строка · <kbd>@</kbd> — упомянуть</div>
+    </div>
+  </main>
+
+  <!-- ======== Волт ======== -->
+  <aside id="vault-pane">
+    <div id="vault-head">
+      <div class="crumbs">
+        <svg class="icon"><use href="#i-book"/></svg>
+        <span>Механики</span>
+        <span class="c-sep">/</span>
+        <span>Инструменты</span>
+        <span class="c-sep">/</span>
+        <span class="c-cur">Пила.md</span>
+      </div>
+      <button class="icon-btn" title="История изменений"><svg class="icon"><use href="#i-clock"/></svg></button>
+      <button class="icon-btn" title="Экспорт в docx"><svg class="icon"><use href="#i-download"/></svg></button>
+      <button class="btn btn-ghost"><svg class="icon sm"><use href="#i-pencil"/></svg>Править</button>
+    </div>
+
+    <div id="vault-doc">
+      <div class="md">
+        <h1>Пила</h1>
+        <div class="doc-meta">Обновлено сегодня в 14:06 · агент · commit a3f19c2</div>
+
+        <p>Ручной инструмент для демонтажа деревянных конструкций. Выдаётся
+        каждому игроку с начала сессии, апгрейды покупаются в
+        <a class="wikilink">[[Хаб-ПК]]</a> за общие деньги бригады.</p>
+
+        <h2>Характеристики</h2>
+        <table>
+          <tr><th>Параметр</th><th>Базовое</th><th>Ур. 2</th><th>Ур. 3</th></tr>
+          <tr><td>Урон за тик</td><td>14</td><td>18</td><td>24</td></tr>
+          <tr><td>Интервал тика</td><td>0,25 с</td><td>0,25 с</td><td>0,2 с</td></tr>
+          <tr><td>DPS</td><td>56</td><td>72</td><td>120</td></tr>
+        </table>
+
+        <blockquote>Патч 0.9.4: урон поднят с 40 до 56 DPS — демонтаж несущих
+        балок в соло ощущался затянутым (медиана 11 с на балку при цели 6–8 с).</blockquote>
+
+        <h2>Правила работы</h2>
+        <ul>
+          <li>Пилит только материалы с тегом <code>Wood</code>; металл и бетон —
+            зона <a class="wikilink">[[Кувалда|кувалды]]</a>.</li>
+          <li>Прогресс распила — <code>SyncVar</code>, виден всем игрокам на детали.</li>
+          <li>Распил несущего элемента запускает проверку устойчивости —
+            см. <a class="wikilink">[[Разрушение конструкций]]</a>.</li>
+        </ul>
+      </div>
+
+      <div id="backlinks">
+        <div class="bl-title">Ссылаются на этот документ</div>
+        <div class="bl"><svg class="icon"><use href="#i-file"/></svg>Механики/Разрушение конструкций.md</div>
+        <div class="bl"><svg class="icon"><use href="#i-file"/></svg>Экономика/Апгрейды инструментов.md</div>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<script>
+  document.getElementById("btn-theme").addEventListener("click", () => {
+    const html = document.documentElement;
+    const next = html.getAttribute("data-theme") === "light" ? "dark" : "light";
+    html.setAttribute("data-theme", next);
+    localStorage.setItem("gd_preview_theme", next);
+  });
+</script>
+</body>
+</html>

@@ -137,7 +137,7 @@ const APP = (() => {
     const btn = document.getElementById("btn-notify");
     if (!canNotify){ btn.style.display = "none"; return; }
     btn.style.display = "";
-    btn.textContent = notifyEnabled() ? "🔔" : "🔕";
+    btn.innerHTML = notifyEnabled() ? ICON("bell") : ICON("bell-off");
     btn.title = Notification.permission === "denied"
       ? "Уведомления запрещены в настройках браузера"
       : (notifyEnabled() ? "Уведомления включены" : "Включить уведомления");
@@ -183,7 +183,7 @@ const APP = (() => {
   const soundBtn = document.getElementById("btn-sound");
 
   function updateSoundBtn(){
-    soundBtn.textContent = SOUND.isOn() ? "🔊" : "🔇";
+    soundBtn.innerHTML = SOUND.isOn() ? ICON("volume") : ICON("volume-off");
     soundBtn.title = SOUND.isOn()
       ? `Звук включён (${Math.round(SOUND.volume() * 100)}%) — клик выключает,` +
         " колесо мыши меняет громкость"
@@ -215,7 +215,7 @@ const APP = (() => {
       div.className = "chat-item";
       div.title = "@" + u.login + " — написать в личку";
       const on = window.ONLINE && window.ONLINE.has(u.id);
-      div.innerHTML = `<span class="presence${on ? " on" : ""}">👤</span>` +
+      div.innerHTML = `<span class="presence${on ? " on" : ""}">${ICON("user")}</span>` +
         `<span class="name">${MD.esc(u.display_name)}</span>`;
       div.onclick = () => openDm(u.id);
       el.appendChild(div);
@@ -240,12 +240,12 @@ const APP = (() => {
       div.className = "chat-item" +
         (CHAT.currentId() === c.id && !KANBAN.isOpen() ? " active" : "") +
         (c.kind === "channel" && !c.is_member ? " not-member" : "");
-      const icon = c.kind === "agent" ? "🤖" : c.kind === "dm" ? "✉️" : (c.is_private ? "🔒" : "#");
+      const icon = c.kind === "agent" ? ICON("spark") : c.kind === "dm" ? "" : (c.is_private ? ICON("lock") : ICON("hash"));
       let badge = "";
       if (c.unread > 0)
         badge = `<span class="badge${c.mentioned ? " mention" : ""}">${c.unread}</span>`;
       const draft = (localStorage.getItem("gd_draft_" + c.id) || "").trim() &&
-                    CHAT.currentId() !== c.id ? '<span class="draft-mark" title="черновик">✏</span>' : "";
+                    CHAT.currentId() !== c.id ? `<span class="draft-mark" title="черновик">${ICON("pencil", "xs")}</span>` : "";
       div.innerHTML = `<span>${icon}</span><span class="name">${MD.esc(c.title)}</span>${draft}${badge}`;
       div.onclick = () => selectChat(c.id);
       el.appendChild(div);
@@ -394,7 +394,7 @@ const APP = (() => {
         for (const d of data.docs){
           const el = document.createElement("div");
           el.className = "sr-item";
-          el.innerHTML = `📄 ${MD.esc(d.name)} <span class="meta">${MD.esc(d.path)}</span>
+          el.innerHTML = `${ICON("file", "sm")} ${MD.esc(d.name)} <span class="meta">${MD.esc(d.path)}</span>
             ${d.snippet ? `<div class="snip">${MD.esc(d.snippet)}</div>` : ""}`;
           el.onclick = () => { closeModal(); VAULT.openDoc(d.path); };
           results.appendChild(el);
@@ -403,9 +403,9 @@ const APP = (() => {
       if (data.messages.length){
         results.insertAdjacentHTML("beforeend", `<div class="sr-section">Сообщения</div>`);
         for (const m of data.messages){
-          const where = m.chat_kind === "dm" ? "✉️ ЛС" :
-                        m.chat_kind === "agent" ? "🤖 " + MD.esc(m.chat_title)
-                                                : "#" + MD.esc(m.chat_title);
+          const where = m.chat_kind === "dm" ? ICON("mail", "sm") + " ЛС" :
+                        m.chat_kind === "agent" ? ICON("spark", "sm") + " " + MD.esc(m.chat_title)
+                                                : ICON("hash", "sm") + " " + MD.esc(m.chat_title);
           const el = document.createElement("div");
           el.className = "sr-item";
           el.innerHTML = `<span class="meta">${where} · ${MD.esc(m.author_name)}
@@ -433,8 +433,8 @@ const APP = (() => {
         const url = new URL("invite/" + i.token, location.href).href;
         return `<div class="admin-user" data-token="${i.token}">
           <input type="text" class="inv-link" readonly value="${url}" style="flex:1;margin:0">
-          <button class="b-copy" title="Скопировать">📋</button>
-          <button class="b-revoke" title="Отозвать">✕</button>
+          <button class="b-copy" title="Скопировать">${ICON("copy")}</button>
+          <button class="b-revoke" title="Отозвать">${ICON("x")}</button>
         </div>`;
       }
       const status = i.used_login ? `использована — @${MD.esc(i.used_login)}` : "истекла";
@@ -445,8 +445,8 @@ const APP = (() => {
       <div id="admin-list">${users.map(u => `
         <div class="admin-user${u.disabled_at ? " off" : ""}" data-id="${u.id}">
           <span class="who">${MD.esc(u.display_name)} <small>@${u.login}${u.is_admin ? " · админ" : ""}</small></span>
-          <button class="b-pass" title="Сбросить пароль">🔑</button>
-          <button class="b-off" title="${u.disabled_at ? "Включить" : "Отключить"}">${u.disabled_at ? "▶" : "⏸"}</button>
+          <button class="b-pass" title="Сбросить пароль">${ICON("key")}</button>
+          <button class="b-off" title="${u.disabled_at ? "Включить" : "Отключить"}">${u.disabled_at ? ICON("play") : ICON("pause")}</button>
         </div>`).join("")}</div>
       <hr>
       <h3>Приглашения</h3>
@@ -454,7 +454,7 @@ const APP = (() => {
       человек сам выбирает логин и пароль, после регистрации ссылка гаснет.
       Неиспользованная — истекает через 7 дней.</p>
       <div id="inv-list">${invites.map(inviteRow).join("") || "<i>приглашений нет</i>"}</div>
-      <div class="row"><button id="m-cancel">Закрыть</button><button id="m-invite">➕ Ссылка-приглашение</button></div>`);
+      <div class="row"><button id="m-cancel">Закрыть</button><button id="m-invite">${ICON("plus")} Ссылка-приглашение</button></div>`);
     modal.querySelector("#m-cancel").onclick = closeModal;
     modal.querySelectorAll(".admin-user[data-id]").forEach(row => {
       const id = row.dataset.id;

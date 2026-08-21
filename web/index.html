@@ -6,6 +6,7 @@
 <title>Foreman</title>
 <link rel="icon" href="favicon.svg?v=1" type="image/svg+xml">
 <script>document.documentElement.dataset.theme = localStorage.getItem("gd_theme") || "dark";</script>
+<link rel="stylesheet" href="vendor/inter/inter.css">
 <link rel="stylesheet" href="vendor/codemirror.min.css">
 <link rel="stylesheet" href="vendor/toastui-editor.min.css">
 <link rel="stylesheet" href="vendor/toastui-editor-dark.min.css">
@@ -18,26 +19,26 @@
     <div class="side-head">
       <span id="me-name"></span>
       <span>
-        <button id="btn-search" title="Поиск (Ctrl+K)">🔍</button>
-        <button id="btn-notify" style="display:none" title="Уведомления">🔕</button>
-        <button id="btn-sound" title="Звук">🔊</button>
-        <button id="btn-theme" title="Сменить тему">🌓</button>
-        <button id="btn-admin" style="display:none" title="Пользователи">⚙</button>
-        <a href="logout" title="Выйти">⏻</a>
+        <button id="btn-search" title="Поиск (Ctrl+K)"><svg class="icon" aria-hidden="true"><use href="#i-search"/></svg></button>
+        <button id="btn-notify" style="display:none" title="Уведомления"><svg class="icon" aria-hidden="true"><use href="#i-bell-off"/></svg></button>
+        <button id="btn-sound" title="Звук"><svg class="icon" aria-hidden="true"><use href="#i-volume"/></svg></button>
+        <button id="btn-theme" title="Сменить тему"><svg class="icon" aria-hidden="true"><use href="#i-moon"/></svg></button>
+        <button id="btn-admin" style="display:none" title="Пользователи"><svg class="icon" aria-hidden="true"><use href="#i-sliders"/></svg></button>
+        <a href="logout" title="Выйти"><svg class="icon" aria-hidden="true"><use href="#i-logout"/></svg></a>
       </span>
     </div>
     <div id="nav-kanban" class="chat-item nav-extra" title="Доска задач команды">
-      <span>📋</span><span class="name">Задачи</span></div>
+      <svg class="icon" aria-hidden="true"><use href="#i-board"/></svg><span class="name">Задачи</span></div>
     <div class="side-section">
-      <div class="side-title">Агент <button id="btn-new-agent" title="Новая сессия">＋</button></div>
+      <div class="side-title">Агент <button id="btn-new-agent" title="Новая сессия"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
       <div id="list-agent" class="chat-list"></div>
     </div>
     <div class="side-section">
-      <div class="side-title">Каналы <button id="btn-new-channel" title="Новый канал">＋</button></div>
+      <div class="side-title">Каналы <button id="btn-new-channel" title="Новый канал"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
       <div id="list-channels" class="chat-list"></div>
     </div>
     <div class="side-section">
-      <div class="side-title">Личные <button id="btn-new-dm" title="Написать">＋</button></div>
+      <div class="side-title">Личные <button id="btn-new-dm" title="Написать"><svg class="icon" aria-hidden="true"><use href="#i-plus"/></svg></button></div>
       <div id="list-dms" class="chat-list"></div>
     </div>
     <div class="side-section">
@@ -52,64 +53,64 @@
       <span id="agent-state"></span>
       <select id="model-select" style="display:none"
               title="Модель агента этого чата (применится со следующего хода)"></select>
-      <button id="btn-stop" style="display:none">■ остановить</button>
-      <button id="btn-del-chat" style="display:none" title="Удалить сессию">🗑</button>
-      <button id="btn-pins" style="display:none" title="Закреплённые сообщения">📌<span id="pin-count"></span></button>
-      <button id="btn-files" style="display:none" title="Файлы чата">📁</button>
-      <button id="btn-vault-toggle" title="Волт">📚</button>
+      <button id="btn-stop" style="display:none"><svg class="icon sm" aria-hidden="true"><use href="#i-stop"/></svg>Остановить</button>
+      <button id="btn-del-chat" style="display:none" title="Удалить сессию"><svg class="icon" aria-hidden="true"><use href="#i-trash"/></svg></button>
+      <button id="btn-pins" style="display:none" title="Закреплённые сообщения"><svg class="icon" aria-hidden="true"><use href="#i-pin"/></svg><span id="pin-count"></span></button>
+      <button id="btn-files" style="display:none" title="Файлы чата"><svg class="icon" aria-hidden="true"><use href="#i-folder"/></svg></button>
+      <button id="btn-vault-toggle" title="Волт"><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg></button>
     </div>
     <div id="messages"></div>
     <div id="typing-line"></div>
     <div id="composer">
       <div id="mention-pop" style="display:none"></div>
       <div id="reply-bar" style="display:none">
-        <span class="rb-icon">↩</span>
+        <span class="rb-icon"><svg class="icon sm" aria-hidden="true"><use href="#i-reply"/></svg></span>
         <span id="reply-bar-text"></span>
-        <b id="reply-bar-x" title="Отменить ответ (Esc)">✕</b>
+        <b id="reply-bar-x" title="Отменить ответ (Esc)"><svg class="icon sm" aria-hidden="true"><use href="#i-x"/></svg></b>
       </div>
       <div id="attach-chips"></div>
       <div id="composer-box">
-        <button id="btn-attach" title="Прикрепить файл с компьютера">📎</button>
-        <button id="btn-attach-doc" title="Прикрепить документ из волта">🔗</button>
+        <button id="btn-attach" title="Прикрепить файл с компьютера"><svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg></button>
+        <button id="btn-attach-doc" title="Прикрепить документ из волта"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></button>
         <input id="file-input" type="file" multiple hidden>
         <textarea id="input" rows="1" placeholder="Сообщение…  @агент — позвать агента"></textarea>
-        <button id="btn-send" title="Отправить (Enter)">➤</button>
+        <button id="btn-send" title="Отправить (Enter)"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button>
       </div>
     </div>
   </main>
 
   <aside id="thread-pane" style="display:none">
     <div id="thread-header">
-      <span>🧵 Тред</span>
-      <button id="btn-thread-close">✕</button>
+      <span><svg class="icon" aria-hidden="true"><use href="#i-thread"/></svg>Тред</span>
+      <button id="btn-thread-close"><svg class="icon" aria-hidden="true"><use href="#i-x"/></svg></button>
     </div>
     <div id="thread-messages"></div>
     <div id="thread-attach-chips"></div>
     <div id="thread-composer">
       <div id="thread-mention-pop" style="display:none"></div>
-      <button id="btn-thread-attach" title="Прикрепить файл">📎</button>
-      <button id="btn-thread-attach-doc" title="Прикрепить документ из волта">🔗</button>
+      <button id="btn-thread-attach" title="Прикрепить файл"><svg class="icon" aria-hidden="true"><use href="#i-clip"/></svg></button>
+      <button id="btn-thread-attach-doc" title="Прикрепить документ из волта"><svg class="icon" aria-hidden="true"><use href="#i-link"/></svg></button>
       <input id="thread-file-input" type="file" multiple hidden>
       <textarea id="thread-input" rows="2" placeholder="Ответить в треде…"></textarea>
-      <button id="btn-thread-send" title="Отправить">➤</button>
+      <button id="btn-thread-send" title="Отправить"><svg class="icon" aria-hidden="true"><use href="#i-send"/></svg></button>
     </div>
   </aside>
 
   <aside id="vault-pane">
     <div id="vault-resizer" title="Потяните, чтобы изменить ширину"></div>
     <div id="vault-header">
-      <span>📚 Волт</span>
-      <label class="upload-btn" title="Загрузить .md или .docx">⬆<input id="upload-input" type="file" accept=".md,.docx,.txt" hidden></label>
-      <button id="btn-vault-back" style="display:none">← дерево</button>
+      <span><svg class="icon" aria-hidden="true"><use href="#i-book"/></svg>Волт</span>
+      <label class="upload-btn" title="Загрузить .md или .docx"><svg class="icon" aria-hidden="true"><use href="#i-upload"/></svg><input id="upload-input" type="file" accept=".md,.docx,.txt" hidden></label>
+      <button id="btn-vault-back" style="display:none"><svg class="icon sm" aria-hidden="true"><use href="#i-arrow-left"/></svg>дерево</button>
     </div>
     <div id="vault-tree"></div>
     <div id="vault-doc" style="display:none">
       <div id="vault-doc-head">
         <span id="vault-doc-path"></span>
-        <button id="btn-doc-history" title="История правок">🕒</button>
-        <button id="btn-doc-export" title="Скачать как docx">⬇</button>
-        <button id="btn-doc-edit" title="Редактировать">✎</button>
-        <button id="btn-doc-save" style="display:none" title="Сохранить (Ctrl+S)">💾</button>
+        <button id="btn-doc-history" title="История правок"><svg class="icon" aria-hidden="true"><use href="#i-clock"/></svg></button>
+        <button id="btn-doc-export" title="Скачать как docx"><svg class="icon" aria-hidden="true"><use href="#i-download"/></svg></button>
+        <button id="btn-doc-edit" title="Редактировать"><svg class="icon" aria-hidden="true"><use href="#i-pencil"/></svg></button>
+        <button id="btn-doc-save" style="display:none" title="Сохранить (Ctrl+S)"><svg class="icon" aria-hidden="true"><use href="#i-check"/></svg></button>
       </div>
       <div id="vault-doc-view" class="md"></div>
       <textarea id="vault-doc-edit" style="display:none" spellcheck="false"></textarea>
@@ -127,6 +128,7 @@
 <script src="vendor/cm-continuelist.min.js"></script>
 <script src="vendor/toastui-editor-all.min.js"></script>
 <script src="vendor/toastui-editor-ru-ru.min.js"></script>
+<script src="icons.js"></script>
 <script src="md.js"></script>
 <script src="sound.js"></script>
 <script src="diff.js"></script>

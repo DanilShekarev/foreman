@@ -151,7 +151,7 @@ const VAULT = (() => {
         kids.className = "tree-children";
         d.appendChild(kids);
         const paint = open => {
-          label.innerHTML = `${open ? "📂" : "📁"} ${MD.esc(n.name)}`;
+          label.innerHTML = `${open ? ICON("chevron-down", "xs") : ICON("chevron-right", "xs")}${ICON("folder", "sm")} ${MD.esc(n.name)}`;
           kids.style.display = open ? "" : "none";
         };
         paint(openDirs.has(n.path));
@@ -166,7 +166,7 @@ const VAULT = (() => {
       } else {
         const f = document.createElement("div");
         f.className = "tree-file";
-        f.textContent = "📄 " + n.name;
+        f.innerHTML = ICON("file", "sm") + " " + MD.esc(n.name);
         f.title = n.path;
         f.onclick = () => openDoc(n.path);
         box.appendChild(f);
@@ -209,7 +209,7 @@ const VAULT = (() => {
     if (currentPath !== path || !links.length) return;
     const box = document.createElement("div");
     box.id = "backlinks";
-    box.innerHTML = "← Ссылаются: ";
+    box.innerHTML = ICON("arrow-left", "sm") + " Ссылаются: ";
     for (const l of links){
       const chip = document.createElement("span");
       chip.className = "bl";
@@ -317,7 +317,7 @@ const VAULT = (() => {
     const items = await r.json();
     if (items.error){ alert(items.error); return; }
     setEditing(false);
-    const back = `<div class="hist-item" id="hist-back">← к документу</div>`;
+    const back = `<div class="hist-item" id="hist-back">${ICON("arrow-left", "sm")} к документу</div>`;
     viewEl.innerHTML = back + (items.map(h => `
       <div class="hist-item" data-hash="${h.hash}">
         ${MD.esc(h.subject)}

@@ -29,7 +29,7 @@ const CHAT = (() => {
     if (current) saveDraft();
     current = chat;
     closeThread();
-    titleEl.textContent = chatLabel(chat);
+    titleEl.innerHTML = chatLabel(chat);
     messagesEl.innerHTML = "<div class='msg system'>загрузка…</div>";
     document.getElementById("btn-pins").style.display = "";
     document.getElementById("btn-files").style.display = "";
@@ -58,9 +58,9 @@ const CHAT = (() => {
   }
 
   function chatLabel(c){
-    if (c.kind === "agent") return "🤖 " + c.title;
-    if (c.kind === "dm") return "✉️ " + c.title;
-    return (c.is_private ? "🔒 " : "#") + c.title;
+    if (c.kind === "agent") return ICON("spark") + " " + MD.esc(c.title);
+    if (c.kind === "dm") return ICON("mail") + " " + MD.esc(c.title);
+    return (c.is_private ? ICON("lock") : ICON("hash")) + " " + MD.esc(c.title);
   }
 
   function appendWithDaySep(container, msgs, opts){
@@ -99,7 +99,7 @@ const CHAT = (() => {
     if (data.chat && data.chat.kind === "agent" && data.chat.title &&
         data.chat.title !== current.title){
       current.title = data.chat.title;
-      titleEl.textContent = chatLabel(current);
+      titleEl.innerHTML = chatLabel(current);
       APP.refreshChats();
     }
     // Модель мог сменить другой участник — синхронизируем селектор.
@@ -236,10 +236,13 @@ const CHAT = (() => {
 
   // ------------------------------------------------------------- рендер
 
+  const AVA_COLORS = ["var(--av-1)", "var(--av-2)", "var(--av-3)",
+                      "var(--av-4)", "var(--av-5)", "var(--av-6)"];
+
   function avatarColor(name){
     let h = 0;
     for (const ch of name) h = (h * 31 + ch.codePointAt(0)) % 360;
-    return `hsl(${h}, 40%, 46%)`;
+    return AVA_COLORS[h % 6];
   }
 
   function initials(name){
@@ -262,7 +265,7 @@ const CHAT = (() => {
       .toLocaleTimeString("ru-RU", {hour: "2-digit", minute: "2-digit"}) : "";
     const canThread = !inThread && m.thread_root_id == null;
     const avatar = m.author_kind === "agent"
-      ? `<div class="avatar">🤖</div>`
+      ? `<div class="avatar">${ICON("spark")}</div>`
       : `<div class="avatar" style="background:${avatarColor(m.author_name)}">${MD.esc(initials(m.author_name))}</div>`;
     const own = m.author_kind === "user" && window.ME &&
                 m.author_user_id === window.ME.id;
@@ -284,7 +287,7 @@ const CHAT = (() => {
       : "";
     // Галочки прочитанности — у своих сообщений в чатах с людьми.
     const ticks = own && current && current.kind !== "agent"
-      ? `<span class="ticks" data-mid="${m.id}">✓</span>` : "";
+      ? `<span class="ticks" data-mid="${m.id}">${ICON("check", "sm")}</span>` : "";
     div.innerHTML = `${avatar}<div class="msg-main">
       <div class="head">
         <span class="author">${MD.esc(m.author_name)}</span>
@@ -293,11 +296,11 @@ const CHAT = (() => {
           EMOJI.slice(0, 3).map(e =>
             `<button data-react="${e}">${e}</button>`).join("")}</span><span
           class="act-group act-tools">${
-          canReply ? '<button class="b-reply" title="Ответить">↩</button>' : ""}${
-          canThread ? '<button class="b-thread" title="Ответить в треде">💬</button>' : ""}<button
-          class="b-pin" title="${m.pinned_at ? "Открепить" : "Закрепить"}">📌</button>${
-          own ? '<button class="b-edit" title="Редактировать">✎</button>' : ""}${
-          canDel ? '<button class="b-del" title="Удалить">🗑</button>' : ""}</span></span>
+          canReply ? `<button class="b-reply" title="Ответить">${ICON("reply", "sm")}</button>` : ""}${
+          canThread ? `<button class="b-thread" title="Ответить в треде">${ICON("thread", "sm")}</button>` : ""}<button
+          class="b-pin" title="${m.pinned_at ? "Открепить" : "Закрепить"}">${m.pinned_at ? ICON("pin-off", "sm") : ICON("pin", "sm")}</button>${
+          own ? `<button class="b-edit" title="Редактировать">${ICON("pencil", "sm")}</button>` : ""}${
+          canDel ? `<button class="b-del" title="Удалить">${ICON("trash", "sm")}</button>` : ""}</span></span>
       </div>
       <div class="body md"></div>
     </div>`;
@@ -329,7 +332,8 @@ const CHAT = (() => {
       }
       const card = document.createElement("div");
       card.className = "attach-card";
-      card.textContent = (a.upload_id ? "📎 " : "📄 ") + (a.title || a.path || "файл");
+      card.innerHTML = (a.upload_id ? ICON("clip", "sm") : ICON("file", "sm")) +
+        " " + MD.esc(a.title || a.path || "файл");
       card.onclick = a.upload_id
         ? () => window.open(`api/upload/${a.upload_id}`, "_blank")
         : () => VAULT.openDoc(a.path);
@@ -340,7 +344,7 @@ const CHAT = (() => {
     if (canThread && m.reply_count > 0){
       const link = document.createElement("span");
       link.className = "reply-link";
-      link.textContent = `💬 ${m.reply_count} ${plural(m.reply_count, "ответ", "ответа", "ответов")}`;
+      link.innerHTML = `${ICON("thread", "sm")} ${m.reply_count} ${plural(m.reply_count, "ответ", "ответа", "ответов")}`;
       link.onclick = () => openThread(m);
       main.appendChild(link);
     }
@@ -398,7 +402,7 @@ const CHAT = (() => {
   function applyTicks(){
     document.querySelectorAll(".ticks").forEach(el => {
       const read = readBy(+el.dataset.mid).length > 0;
-      el.textContent = read ? "✓✓" : "✓";
+      el.innerHTML = read ? ICON("check2", "sm") : ICON("check", "sm");
       el.classList.toggle("read", read);
     });
   }
@@ -414,7 +418,7 @@ const CHAT = (() => {
 
   function whoReadModal(m){
     const readers = readBy(m.id);
-    openChatModal(`<h3>✓ Кто прочитал</h3>
+    openChatModal(`<h3>${ICON("check")} Кто прочитал</h3>
       <div class="read-list">${readers.length ? readers.map(r =>
         `<div class="read-item"><b>${MD.esc(r.name)}</b>
            <span>${r.read_at ? fmtFull(r.read_at) : ""}</span></div>`).join("")
@@ -489,12 +493,13 @@ const CHAT = (() => {
     const menu = ensureCtxMenu();
     const items = [];
     if (canReply)
-      items.push({icon: "↩", label: "Ответить", act: () => setReply(m)});
+      items.push({icon: ICON("reply", "sm"), label: "Ответить", act: () => setReply(m)});
     if (canThread)
-      items.push({icon: "💬", label: "Ответить в треде", act: () => openThread(m)});
-    items.push({icon: "📋", label: "Копировать текст",
+      items.push({icon: ICON("thread", "sm"), label: "Ответить в треде", act: () => openThread(m)});
+    items.push({icon: ICON("copy", "sm"), label: "Копировать текст",
                 act: () => copyText(m.text || "")});
-    items.push({icon: "📌", label: m.pinned_at ? "Открепить" : "Закрепить",
+    items.push({icon: m.pinned_at ? ICON("pin-off", "sm") : ICON("pin", "sm"),
+                label: m.pinned_at ? "Открепить" : "Закрепить",
                 act: async () => {
                   const r = await fetch(`api/messages/${m.id}/pin`, {method: "POST"});
                   const data = await r.json().catch(() => ({}));
@@ -502,9 +507,9 @@ const CHAT = (() => {
                   refetch();
                 }});
     if (own && current && current.kind !== "agent")
-      items.push({icon: "✓", label: "Кто прочитал", act: () => whoReadModal(m)});
+      items.push({icon: ICON("check", "sm"), label: "Кто прочитал", act: () => whoReadModal(m)});
     if (m.reply_to_id && !inThread)
-      items.push({icon: "🧵", label: "Цепочку — в тред", act: async () => {
+      items.push({icon: ICON("thread", "sm"), label: "Цепочку — в тред", act: async () => {
         const r = await fetch(`api/messages/${m.id}/to-thread`, {method: "POST"});
         const data = await r.json().catch(() => ({}));
         if (data.error){ alert(data.error); return; }
@@ -512,14 +517,14 @@ const CHAT = (() => {
         if (data.root) openThread(data.root);
       }});
     if (own){
-      items.push({icon: "✎", label: "Редактировать", act: () => {
+      items.push({icon: ICON("pencil", "sm"), label: "Редактировать", act: () => {
         const div = (inThread ? threadMessagesEl : messagesEl)
           .querySelector(`.msg[data-id="${m.id}"]`);
         if (div) startEdit(div, m);
       }});
     }
     if (canDel)
-      items.push({icon: "🗑", label: "Удалить", danger: true,
+      items.push({icon: ICON("trash", "sm"), label: "Удалить", danger: true,
                   act: () => deleteMessage(m)});
     menu.innerHTML = `
       <div class="ctx-emoji">${EMOJI.map(e =>
@@ -603,8 +608,8 @@ const CHAT = (() => {
       <div class="lb-bar">
         <span class="lb-title"></span>
         <span class="lb-count"></span>
-        <a class="lb-dl" title="Скачать">⬇ скачать</a>
-        <button class="lb-close" title="Закрыть (Esc)">✕</button>
+        <a class="lb-dl" title="Скачать">${ICON("download", "sm")} скачать</a>
+        <button class="lb-close" title="Закрыть (Esc)">${ICON("x")}</button>
       </div>
       <button class="lb-nav lb-prev" title="Предыдущая (←)">‹</button>
       <div class="lb-stage"><img class="lb-img"></div>
@@ -703,7 +708,7 @@ const CHAT = (() => {
     const r = await fetch(`api/turn/${turnId}`);
     if (!r.ok) return;
     const turn = await r.json();
-    // Плашка и строки 🔧 приходят ПОСЛЕ отрисовки ленты и раздвигают её —
+    // Плашка и строки инструментов приходят ПОСЛЕ отрисовки ленты и раздвигают её —
     // если читатель был внизу, дожимаем скролл.
     const scroller = div.closest("#messages, #thread-messages");
     const stick = scroller && nearBottom(scroller);
@@ -727,7 +732,7 @@ const CHAT = (() => {
     else head.appendChild(b);
   }
 
-  // Строки «🔧 инструмент» при перерисовке ленты — из tools_json хода.
+  // Строки «инструмент» при перерисовке ленты — из tools_json хода.
   // Живой стрим рисует их сам по событиям — тогда они уже в div.
   function renderToolLines(div, tools){
     if (!tools || !tools.length || div.querySelector(".tool-line")) return;
@@ -741,7 +746,7 @@ const CHAT = (() => {
     const el = document.createElement("div");
     el.className = "tool-line";
     const arg = shortToolInput(input);
-    el.textContent = `🔧 ${toolLabel(name)} ${midTrim(arg)}`;
+    el.innerHTML = `${ICON("chevron-right", "sm")} ${MD.esc(toolLabel(name))} ${MD.esc(midTrim(arg))}`;
     if (arg.length > 46) el.title = arg;  // полный путь — по ховеру
     return el;
   }
@@ -762,7 +767,7 @@ const CHAT = (() => {
       if (turn.status === "error" && turn.error && !plaque){
         plaque = document.createElement("div");
         plaque.className = "turn-plaque";
-        plaque.innerHTML = `<span style="color:var(--red)">⚠️ ${MD.esc(turn.error)}</span>`;
+        plaque.innerHTML = `<span style="color:var(--red)">${MD.esc(turn.error)}</span>`;
         msgMain(div).appendChild(plaque);
       }
       return;
@@ -773,7 +778,7 @@ const CHAT = (() => {
       msgMain(div).appendChild(plaque);
     }
     plaque.innerHTML = `
-      <div>✏️ Изменено файлов: ${turn.files.length}</div>
+      <div>${ICON("pencil", "sm")} Изменено файлов: ${turn.files.length}</div>
       <div class="files">${turn.files.map(MD.esc).join("<br>")}</div>
       <button class="b-diff">показать diff</button>
       ${turn.commit_hash ? '<button class="b-revert">откатить</button>' : ""}
@@ -838,7 +843,7 @@ const CHAT = (() => {
           } else if (ev.type === "start"){
             agentDiv = document.createElement("div");
             agentDiv.className = "msg agent";
-            agentDiv.innerHTML = `<div class="avatar">🤖</div><div class="msg-main">
+            agentDiv.innerHTML = `<div class="avatar">${ICON("spark")}</div><div class="msg-main">
               <div class="head"><span class="author">Агент</span></div>
               <div class="body md streaming-dot"></div></div>`;
             agentDiv.dataset.turn = ev.turn;
@@ -864,7 +869,7 @@ const CHAT = (() => {
             const t = document.createElement("div");
             t.className = "msg system";
             t.style.color = "var(--red)";
-            t.textContent = "⚠️ " + ev.text;
+            t.textContent = ev.text;
             container.appendChild(t);
           }
         }
@@ -917,7 +922,7 @@ const CHAT = (() => {
     for (let i = 0; i < list.length; i++){
       const chip = document.createElement("span");
       chip.className = "attach-chip";
-      chip.innerHTML = `📄 ${MD.esc(list[i].title)} <b title="убрать">✕</b>`;
+      chip.innerHTML = `${ICON("file", "sm")} ${MD.esc(list[i].title)} <b title="убрать">${ICON("x", "xs")}</b>`;
       chip.querySelector("b").onclick = () => {
         list.splice(i, 1);
         renderChips(el, list);
@@ -1213,8 +1218,8 @@ const CHAT = (() => {
     const r = await fetch(`api/chats/${current.id}/pins`);
     const data = await r.json();
     const pins = data.pins || [];
-    openChatModal(`<h3>📌 Закреплённые</h3>
-      <div class="pin-list">${pins.length ? "" : "<i>пока пусто — 📌 на любом сообщении</i>"}</div>
+    openChatModal(`<h3>${ICON("pin")} Закреплённые</h3>
+      <div class="pin-list">${pins.length ? "" : `<i>пока пусто — ${ICON("pin", "sm")} на любом сообщении</i>`}</div>
       <div class="row"><button id="m-close">Закрыть</button></div>`);
     const listEl = document.querySelector("#modal .pin-list");
     for (const m of pins){
@@ -1222,7 +1227,7 @@ const CHAT = (() => {
       item.className = "pin-item";
       item.innerHTML = `<div class="pin-head"><b>${MD.esc(m.author_name)}</b>
         <span>${fmtFull(m.created_at)}</span>
-        <button class="pin-off" title="Открепить">✕</button></div>
+        <button class="pin-off" title="Открепить">${ICON("x", "sm")}</button></div>
         <div class="md"></div>`;
       item.querySelector(".md").innerHTML = MD.render(m.text || "");
       item.querySelector(".pin-off").onclick = async e => {
@@ -1252,7 +1257,7 @@ const CHAT = (() => {
     const files = data.files || [];
     const imgs = files.filter(f => f.upload_id && f.image);
     const rest = files.filter(f => !(f.upload_id && f.image));
-    openChatModal(`<h3>📁 Файлы чата</h3>
+    openChatModal(`<h3>${ICON("folder")} Файлы чата</h3>
       ${files.length ? "" : "<i>вложений пока нет</i>"}
       <div class="files-grid"></div><div class="files-list"></div>
       <div class="row"><button id="m-close">Закрыть</button></div>`);
@@ -1270,7 +1275,7 @@ const CHAT = (() => {
     for (const f of rest){
       const item = document.createElement("div");
       item.className = "file-card";
-      item.innerHTML = `<span>${f.upload_id ? "📎" : "📄"}</span>
+      item.innerHTML = `<span>${f.upload_id ? ICON("clip", "sm") : ICON("file", "sm")}</span>
         <span class="fc-title">${MD.esc(f.title || f.path || "файл")}</span>
         <small>${MD.esc(f.author)} · ${fmtWhen(f.created_at)}</small>`;
       item.onclick = f.upload_id
