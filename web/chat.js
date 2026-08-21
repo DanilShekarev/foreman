@@ -57,6 +57,7 @@ const CHAT = (() => {
     fillModelSel();
     modelSel.style.display = "";
     modelSel.value = chat.model || "";
+    if (typeof CALL !== "undefined") CALL.onChatOpen(chat);
     await refetch(true);
   }
 
@@ -227,7 +228,8 @@ const CHAT = (() => {
   // доской задач (доска — оверлей, current под ней остаётся).
   function chatVisible(){
     return !document.hidden &&
-           !(typeof KANBAN !== "undefined" && KANBAN.isOpen());
+           !(typeof KANBAN !== "undefined" && KANBAN.isOpen()) &&
+           !(typeof CALL !== "undefined" && CALL.isOpen());
   }
 
   function markRead(){
@@ -300,7 +302,37 @@ const CHAT = (() => {
     div.className = "msg " + m.author_kind;
     div.dataset.id = m.id;
     if (m.author_kind === "system"){
-      div.textContent = m.text;
+      const atts = (m.attachments || []).filter(a => a.upload_id);
+      if (!atts.length && !m.reply_count){
+        div.textContent = m.text;
+        return div;
+      }
+      // Системное сообщение о звонке: сами дорожки не показываем (они есть
+      // в «Файлах чата»), только тред расшифровки.
+      div.classList.add("sys-rich");
+      const line = document.createElement("div");
+      line.textContent = m.text;
+      div.appendChild(line);
+      if (!inThread && m.reply_count > 0){
+        const link = document.createElement("span");
+        link.className = "reply-link";
+        link.innerHTML = `${ICON("thread", "sm")} ${m.reply_count} ${plural(m.reply_count, "ответ", "ответа", "ответов")}`;
+        link.onclick = () => openThread(m);
+        div.appendChild(link);
+      } else if (!inThread &&
+                 atts.some(a => /\.webm$/i.test(a.title || ""))){
+        const b = document.createElement("button");
+        b.className = "sys-transcribe";
+        b.innerHTML = ICON("thread", "sm") + " Расшифровать";
+        b.onclick = async () => {
+          b.disabled = true;
+          const r = await fetch(`api/messages/${m.id}/transcribe`, {method: "POST"});
+          const data = await r.json().catch(() => ({}));
+          if (data.error){ APP.alert(data.error); b.disabled = false; return; }
+          b.innerHTML = ICON("clock", "sm") + " Расшифровка идёт — реплики появятся в треде";
+        };
+        div.appendChild(b);
+      }
       return div;
     }
     const mentionedMe = window.ME &&
@@ -517,6 +549,29 @@ const CHAT = (() => {
     if (!jumpToMessage(id))
       APP.alert(`Сообщение m${id} не найдено в ленте — возможно, оно в треде,` +
             ` другом чате или удалено`);
+  }
+
+  // Переход из ленты «Активность» (#82) к сообщению внутри треда: находим
+  // корень в загруженной ленте (при промахе расширяем окно истории),
+  // открываем тред и подсвечиваем целевое сообщение.
+  async function openThreadAt(rootId, msgId){
+    let root = lastList.find(m => m.id === rootId);
+    if (!root && !histEnd && histLimit < 1000){
+      histLimit = 1000;
+      await refetch();
+      root = lastList.find(m => m.id === rootId);
+    }
+    if (!root){
+      APP.alert(`Корень треда m${rootId} не найден в ленте — возможно, он удалён`);
+      return;
+    }
+    await openThread(root);
+    const div = threadMessagesEl.querySelector(`.msg[data-id="${msgId}"]`);
+    if (div){
+      div.scrollIntoView({block: "center"});
+      div.classList.add("flash");
+      setTimeout(() => div.classList.remove("flash"), 1600);
+    }
   }
 
   // ------------------------------------------------------ контекстное меню
@@ -1390,6 +1445,7 @@ const CHAT = (() => {
   }
 
   return { open, onChanges, showTyping, updateReads, closeThread, jumpToMsg,
+           openThreadAt, avatarColor, initials,
            // Зов снаружи (закрытие доски задач): чат снова виден — прочитан.
            markVisible: () => { if (lastMsgId && chatVisible()) markRead(); },
            currentId: () => current && current.id };

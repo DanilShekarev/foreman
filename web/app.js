@@ -41,6 +41,7 @@ const APP = (() => {
     const init = await (await fetch("api/changes")).json();
     since = init.now;
     vaultVersion = init.vault ?? null;
+    if (init.activity !== undefined) ACT.onCount(init.activity);
     pollLoop();
     updateNotifyBtn();
     // Список людей меняется редко — обновляем раз в минуту (новые регистрации
@@ -100,6 +101,9 @@ const APP = (() => {
         vaultVersion = data.vault;
       }
       if (data.kanban !== undefined) KANBAN.onRev(data.kanban);
+      if (data.activity !== undefined) ACT.onCount(data.activity);
+      if (data.calls !== undefined && typeof CALL !== "undefined")
+        CALL.onCalls(data.calls);
       if (data.events.length){
         refreshChats();
         CHAT.onChanges(data.events);
@@ -244,9 +248,11 @@ const APP = (() => {
       let badge = "";
       if (c.unread > 0)
         badge = `<span class="badge${c.mentioned ? " mention" : ""}">${c.unread}</span>`;
+      const call = typeof CALL !== "undefined" && CALL.hasCall(c.id)
+        ? `<span class="call-mark" title="идёт звонок">${ICON("phone", "xs")}</span>` : "";
       const draft = (localStorage.getItem("gd_draft_" + c.id) || "").trim() &&
                     CHAT.currentId() !== c.id ? `<span class="draft-mark" title="черновик">${ICON("pencil", "xs")}</span>` : "";
-      div.innerHTML = `<span>${icon}</span><span class="name">${MD.esc(c.title)}</span>${draft}${badge}`;
+      div.innerHTML = `<span>${icon}</span><span class="name">${MD.esc(c.title)}</span>${call}${draft}${badge}`;
       div.onclick = () => selectChat(c.id);
       div.oncontextmenu = e => { e.preventDefault(); openChatCtxMenu(e.clientX, e.clientY, c); };
       el.appendChild(div);
@@ -312,12 +318,15 @@ const APP = (() => {
     await refreshChats();
   }
 
-  function selectChat(id){
+  // await-able: лента «Активность» после выбора чата прыгает к сообщению —
+  // ей нужно дождаться загрузки ленты (CHAT.open).
+  async function selectChat(id){
     const chat = chats.find(c => c.id === id);
     if (!chat) return;
     KANBAN.close();  // доска — оверлей поверх чата
+    if (typeof ACT !== "undefined") ACT.close();  // и панель активности тоже
     localStorage.setItem("gd_last_chat", id);
-    CHAT.open(chat);
+    await CHAT.open(chat);
     renderChatLists();
   }
 
@@ -700,5 +709,6 @@ const APP = (() => {
 
   boot();
   return { refreshChats, showVault, selectChat, pickFromList, afterChatDeleted,
-           openContextMenu, rerenderLists: renderChatLists, alert: showAlert };
+           openContextMenu, rerenderLists: renderChatLists, alert: showAlert,
+           chatById: id => chats.find(c => c.id === id) };
 })();

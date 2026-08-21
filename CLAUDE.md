@@ -72,6 +72,30 @@ agent_scopes). Ими пользуются и хуки агента, и HTTP-р�
 (таблица `changes`), стримящийся текст агента дописывается в `messages`
 с троттлингом ~1.5 с.
 
+**Созвоны (#86) — единственный WebSocket** (`/api/call/ws?chat=`), только
+сигналинг WebRTC-mesh (медиа ходит P2P/TURN мимо сервера). AuthMiddleware
+websocket-scope НЕ проверяет — авторизация по куке внутри хендлера `call_ws`.
+Активные комнаты — в памяти (`server.py: CALLS`, образец LAST_SEEN); факт
+«идёт звонок» подмешан полем `calls` в `/api/changes`, в таблицу `changes`
+высокочастотное не льётся. Каждый участник пишет свой микрофон
+(MediaRecorder, opus) чанками в `POST /api/call/{id}/rec` →
+`data/calls/{call_id}/{uid}_{session}.webm`; финализация (грейс 60 с после
+ухода последнего) регистрирует дорожки как uploads и постит системное
+сообщение с вложениями. ICE-конфиг — `GET /api/call/ice` из env
+(GD_STUN_URL / GD_TURN_URL+USER+PASS / GD_ICE_JSON), см. start.bat.
+Фронт — `web/call.js`; getUserMedia требует HTTPS, по http-LAN кнопка
+звонка скрыта (как #btn-notify).
+
+**Расшифровка созвонов (#88)** — после финализации `transcribe_call.py`
+запускается ПОД venv соседнего проекта `D:\Agent\dnd-transcribe`
+(`GD_TRANSCRIBE_DIR`; там onnx_asr + модель GigaAM v3, CPU; диаризация не
+нужна — дорожки пер-спикерные, оффсеты входа в `meta.json` рядом с webm).
+Реплики постятся в ТРЕД под системным «Звонок завершён» обычными
+сообщениями от имени говоривших (`author_kind="user"`) — тред полностью
+живой: ответы, реакции, правка своих реплик; агент через store.add_message
+НЕ вызывается (его зовёт только api_send). Очередь — `_TRANSCRIBE_LOCK`
+(по одному звонку), таймаут час, ошибка — системным сообщением в тред.
+
 **Авторизация SDK — подписочная** (`common.py: setup_auth`): токен
 `claude setup-token`. Ищется по списку путей: `GD_CLAUDE_TOKEN_FILE` → свой
 `auth_token.txt` (в .gitignore) → общий `D:\Agent\agent-game\auth_token.txt`

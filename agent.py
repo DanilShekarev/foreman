@@ -54,12 +54,14 @@ DB_THROTTLE = 1.5               # сек между апдейтами стри�
 CHANNEL_CONTEXT_MESSAGES = 100
 
 WRITE_TOOLS = ("Edit", "Write", "MultiEdit")
-FS_TOOLS = ("mcp__fs__copy_file", "mcp__fs__move_file", "mcp__fs__delete_file")
+FS_TOOLS = ("mcp__fs__copy_file", "mcp__fs__move_file", "mcp__fs__delete_file",
+            "mcp__fs__delete_dir")
 KANBAN_TOOLS = ("mcp__kanban__list_cards", "mcp__kanban__create_card",
                 "mcp__kanban__move_card", "mcp__kanban__update_card",
                 "mcp__kanban__get_card", "mcp__kanban__comment_card",
                 "mcp__kanban__checklist_add", "mcp__kanban__checklist_set")
-THREAD_TOOLS = ("mcp__threads__list_recent", "mcp__threads__move_to_thread")
+THREAD_TOOLS = ("mcp__threads__list_recent", "mcp__threads__read_thread",
+                "mcp__threads__move_to_thread")
 # Deny-by-default: CLI-харнес объявляет агенту множество своих инструментов
 # (ToolSearch, Cron*, SendMessage, Task* и т.п.) — всё, чего нет в этом
 # белом списке, режется гардом до выполнения.
@@ -137,16 +139,20 @@ def _make_fs_server(scopes: dict, extra_read: set):
         shutil.copyfile(src, dst)
         return _ok(f"скопировано: {src} -> {dst}")
 
-    @tool("move_file", "Переместить или переименовать файл внутри твоих "
-          "областей записи.", {"src": str, "dst": str})
+    @tool("move_file", "Переместить или переименовать файл или папку внутри "
+          "твоих областей записи.", {"src": str, "dst": str})
     async def move_file(args):
         src, dst = _resolve(args["src"]), _resolve(args["dst"])
         if not _writable(src):
             return _err(f"src вне твоих областей записи: {src}")
-        if not src.is_file():
+        if not src.exists():
             return _err(f"src не существует: {src}")
+        if src in write_roots:
+            return _err(f"корневую папку области записи двигать нельзя: {src}")
         if not _writable(dst):
             return _err(f"dst вне твоих областей записи: {dst}")
+        if src.is_dir() and (dst == src or src in dst.parents):
+            return _err(f"нельзя переместить папку внутрь самой себя: {dst}")
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.move(str(src), str(dst))
         return _ok(f"перемещено: {src} -> {dst}")
@@ -162,8 +168,23 @@ def _make_fs_server(scopes: dict, extra_read: set):
         p.unlink()
         return _ok(f"удалено: {p}")
 
+    @tool("delete_dir", "Удалить папку со всем содержимым в твоих областях "
+          "записи (git сохраняет историю файлов, удаление откатываемо).",
+          {"path": str})
+    async def delete_dir(args):
+        p = _resolve(args["path"])
+        if not _writable(p):
+            return _err(f"путь вне твоих областей записи: {p}")
+        if p in write_roots:
+            return _err(f"корневую папку области записи удалять нельзя: {p}")
+        if not p.is_dir():
+            return _err(f"не папка или не существует: {p}")
+        shutil.rmtree(p)
+        return _ok(f"папка удалена: {p}")
+
     return create_sdk_mcp_server(name="fs", version="1.0.0",
-                                 tools=[copy_file, move_file, delete_file])
+                                 tools=[copy_file, move_file, delete_file,
+                                        delete_dir])
 
 
 def _make_kanban_server():
@@ -502,6 +523,44 @@ def _make_threads_server(chat_id: int):
             lines.append(f"[m{m['id']}] {m['author_name']} ({hhmm}): {text}")
         return _ok("\n".join(lines))
 
+    @tool("read_thread", "Прочитать тред целиком: корень и все ответы, "
+          "полными текстами. Годится для длинных тредов и расшифровок "
+          "созвонов (тред под системным «Звонок завершён»). "
+          "root_message_id — id корневого сообщения ленты (в ленте и "
+          "list_recent это m123; можно передать id любого ответа — корень "
+          "найдётся сам).", {"root_message_id": str})
+    async def read_thread(args):
+        raw_root = (args.get("root_message_id") or "").strip().lstrip("#m")
+        if not raw_root.isdigit():
+            return _err(f"root_message_id должен быть числом,"
+                        f" получил «{raw_root}»")
+        conn = store.connect()
+        try:
+            root = store.get_message(conn, int(raw_root))
+            if root["chat_id"] != chat_id:
+                return _err("это сообщение из другого чата")
+            if root.get("thread_root_id"):
+                root = store.get_message(conn, root["thread_root_id"])
+            msgs = store.list_messages(conn, chat_id, limit=2000,
+                                       thread_root_id=root["id"])
+        except store.StoreError as err:
+            return _err(str(err))
+        finally:
+            conn.close()
+        lines = [f"[m{root['id']}] (корень) {root['author_name']}:"
+                 f" {root.get('text') or '(без текста)'}"]
+        for m in msgs:
+            text = ("(удалено)" if m.get("deleted_at")
+                    else (m.get("text") or "(без текста)"))
+            lines.append(f"[m{m['id']}] {m['author_name']}: {text}")
+        out = "\n".join(lines)
+        # Страховка от простыней: транспорт SDK — 1 МБ на строку JSON.
+        if len(out) > 400_000:
+            out = out[:400_000] + "\n[…тред обрезан, показано начало]"
+        if not msgs:
+            out += "\n(ответов в треде нет)"
+        return _ok(out)
+
     @tool("move_to_thread", "Перенести сообщения ленты этого чата в тред "
           "указанного корневого сообщения (сообщение остаётся видно в "
           "ленте как корень, остальные уходят в его тред). "
@@ -537,7 +596,8 @@ def _make_threads_server(chat_id: int):
                    f" {_ru_plural(n, 'сообщение', 'сообщения', 'сообщений')}")
 
     return create_sdk_mcp_server(name="threads", version="1.0.0",
-                                 tools=[list_recent, move_to_thread])
+                                 tools=[list_recent, read_thread,
+                                        move_to_thread])
 
 
 def _make_guards(scopes: dict, extra_read: set):
@@ -868,7 +928,8 @@ class SessionManager:
                                 keys = ("dst",)
                             elif block.name.endswith("move_file"):
                                 keys = ("src", "dst")   # src — удаление
-                            elif block.name.endswith("delete_file"):
+                            elif block.name.endswith(("delete_file",
+                                                      "delete_dir")):
                                 keys = ("path",)
                             for key in keys:
                                 raw = (block.input or {}).get(key)

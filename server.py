@@ -18,7 +18,8 @@ from typing import Optional
 
 import common  # noqa: F401  (utf-8 консоль, QuickEdit) — импорт с побочным эффектом
 import uvicorn
-from fastapi import FastAPI, Request, UploadFile
+from dataclasses import dataclass, field
+from fastapi import FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import (HTMLResponse, JSONResponse, RedirectResponse,
                                Response, StreamingResponse)
 from fastapi.staticfiles import StaticFiles
@@ -58,8 +59,14 @@ async def lifespan(app: FastAPI):
         if row is None:
             admin = store.user_by_login(conn, "admin") or store.list_users(conn)[0]
             store.create_channel(conn, admin, "Общий", False, [])
+        orphans = store.unfinished_calls(conn)
     finally:
         conn.close()
+    # Звонки, оборванные рестартом: записи уже на диске — регистрируем.
+    for c in orphans:
+        root_id, n_tracks = _finalize_call(c["id"], c["chat_id"], {})
+        if n_tracks:
+            _spawn_transcribe(c["id"], c["chat_id"], root_id)
     # Карта Unity-проекта для агента: сеется из vault_seed при первом старте
     # (сам волт в .gitignore — он отдельный репозиторий).
     seed = HERE / "vault_seed" / "UNITY_PROJECT_MAP.md"
@@ -851,19 +858,437 @@ async def api_changes(request: Request, since: int = -1, chat: int = 0):
                             for uid in typing_names]
         reads = store.chat_reads_info(conn, chat) if chat else []
         kanban_rev = store.kanban_rev(conn)
+        act_unread = store.activity_unread(conn, user)
+        calls = _calls_field(conn, user)
         if since < 0:
             return {"now": store.max_change_id(conn), "events": [],
                     "online_ids": online, "typing": typing_names,
                     "reads": reads, "vault": gitops.VERSION,
-                    "kanban": kanban_rev}
+                    "kanban": kanban_rev, "activity": act_unread,
+                    "calls": calls}
         events = store.changes_since(conn, me(request), since)
         now = events[-1]["id"] if events else since
         return {"now": now, "events": events,
                 "online_ids": online, "typing": typing_names,
                 "reads": reads, "vault": gitops.VERSION,
-                "kanban": kanban_rev}
+                "kanban": kanban_rev, "activity": act_unread,
+                "calls": calls}
     finally:
         conn.close()
+
+
+@app.get("/api/activity")
+async def api_activity(request: Request, limit: int = 50):
+    """Лента «Активность»: @упоминания меня и ответы на мои сообщения (#82)."""
+    conn = store.connect()
+    try:
+        return store.activity(conn, me(request), min(max(limit, 1), 200))
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------- звонки (#86)
+# WebRTC mesh: сервер — только сигналинг (WS) и приёмник записи. Активные
+# комнаты в памяти (1 воркер), в БД — строка calls + системные сообщения.
+
+CALLS_DIR = HERE / "data" / "calls"
+CALL_GRACE_SECONDS = 60   # пустая комната живёт минуту: F5 последнего участника
+MAX_REC_CHUNK = 10 * 1024 * 1024
+
+
+@dataclass
+class CallPeer:
+    user_id: int
+    name: str
+    ws: WebSocket
+    muted: bool = False
+    sharing: bool = False
+    session: int = 1
+
+
+@dataclass
+class CallRoom:
+    call_id: int
+    chat_id: int
+    started_by: int
+    started_mono: float
+    peers: dict[int, CallPeer] = field(default_factory=dict)
+    sessions: dict[int, int] = field(default_factory=dict)   # user_id -> счётчик join-ов
+    rec_seq: dict[tuple[int, int], int] = field(default_factory=dict)
+    names: dict[int, str] = field(default_factory=dict)      # все побывавшие в звонке
+    joins: list[dict] = field(default_factory=list)          # оффсеты дорожек для расшифровки
+    finalize_task: Optional[asyncio.Task] = None
+    lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+
+CALLS: dict[int, CallRoom] = {}   # chat_id -> комната
+
+
+async def _call_send(peer: CallPeer, obj: dict) -> None:
+    try:
+        await peer.ws.send_json(obj)
+    except Exception:
+        pass  # умирающий сокет добьёт его собственный хендлер
+
+
+async def _call_broadcast(room: CallRoom, obj: dict, skip: int = 0) -> None:
+    for p in list(room.peers.values()):
+        if p.user_id != skip:
+            await _call_send(p, obj)
+
+
+def _fmt_duration(seconds: float) -> str:
+    s = int(seconds)
+    if s >= 3600:
+        return f"{s // 3600}:{s % 3600 // 60:02d}:{s % 60:02d}"
+    return f"{s // 60}:{s % 60:02d}"
+
+
+def _write_call_meta(room: CallRoom) -> None:
+    rec_dir = CALLS_DIR / str(room.call_id)
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    (rec_dir / "meta.json").write_text(
+        json.dumps({"chat_id": room.chat_id, "joins": room.joins},
+                   ensure_ascii=False), encoding="utf-8")
+
+
+def _finalize_call(call_id: int, chat_id: int, names: dict[int, str],
+                   duration: Optional[float] = None) -> tuple[int, int]:
+    """Возвращает (id корневого системного сообщения, число дорожек)."""
+    conn = store.connect()
+    try:
+        store.end_call(conn, call_id)
+        atts = []
+        rec_dir = CALLS_DIR / str(call_id)
+        for p in sorted(rec_dir.glob("*.webm")) if rec_dir.is_dir() else []:
+            m = re.fullmatch(r"(\d+)_(\d+)\.webm", p.name)
+            if not m:
+                continue
+            uid, session = int(m.group(1)), int(m.group(2))
+            name = names.get(uid)
+            if not name:
+                try:
+                    name = store.get_user(conn, uid)["display_name"]
+                except store.StoreError:
+                    name = f"id{uid}"
+            title = f"Запись — {name}" + (f" ({session})" if session > 1 else "")
+            upload_id = store.add_upload(conn, {"id": uid}, f"{title}.webm",
+                                         f"calls/{call_id}/{p.name}", chat_id)
+            atts.append({"upload_id": upload_id, "title": f"{title}.webm",
+                         "image": False})
+        text = "Звонок завершён"
+        if duration is not None:
+            text += f" · {_fmt_duration(duration)}"
+        if names:
+            text += " · " + ", ".join(sorted(names.values()))
+        msg = store.add_message(conn, chat_id, author_kind="system",
+                                author_user_id=None, author_name="система",
+                                text=text, attachments=atts)
+        return msg["id"], len(atts)
+    finally:
+        conn.close()
+
+
+async def _finalize_later(room: CallRoom) -> None:
+    try:
+        await asyncio.sleep(CALL_GRACE_SECONDS)
+    except asyncio.CancelledError:
+        return
+    if room.peers or CALLS.get(room.chat_id) is not room:
+        return
+    CALLS.pop(room.chat_id, None)
+    root_id, n_tracks = _finalize_call(
+        room.call_id, room.chat_id, room.names,
+        duration=time.monotonic() - room.started_mono)
+    if n_tracks:
+        _spawn_transcribe(room.call_id, room.chat_id, root_id)
+
+
+# --- расшифровка (#88): дорожки — реплики в тред под сообщением о звонке ---
+# ASR — GigaAM из соседнего пайплайна dnd-transcribe, его venv и его модель;
+# у нас только скрипт-мост transcribe_call.py и пост реплик в тред.
+
+TRANSCRIBE_DIR = Path(os.environ.get("GD_TRANSCRIBE_DIR",
+                                     r"D:\Agent\dnd-transcribe"))
+TRANSCRIBE_TIMEOUT = 3600
+_TRANSCRIBE_LOCK = asyncio.Lock()   # ASR грузит CPU — по одному звонку за раз
+_TRANSCRIBE_TASKS: set[asyncio.Task] = set()
+
+
+_TRANSCRIBE_ACTIVE: set[int] = set()
+
+
+def _spawn_transcribe(call_id: int, chat_id: int, root_id: int) -> None:
+    py = TRANSCRIBE_DIR / "venv" / "Scripts" / "python.exe"
+    if not py.is_file() or call_id in _TRANSCRIBE_ACTIVE:
+        return
+    _TRANSCRIBE_ACTIVE.add(call_id)
+    task = asyncio.create_task(_transcribe_call(call_id, chat_id, root_id))
+    _TRANSCRIBE_TASKS.add(task)
+    task.add_done_callback(_TRANSCRIBE_TASKS.discard)
+    task.add_done_callback(lambda _t: _TRANSCRIBE_ACTIVE.discard(call_id))
+
+
+async def _transcribe_call(call_id: int, chat_id: int, root_id: int) -> None:
+    rec_dir = CALLS_DIR / str(call_id)
+    out_json = rec_dir / "transcript.json"
+    py = TRANSCRIBE_DIR / "venv" / "Scripts" / "python.exe"
+    async with _TRANSCRIBE_LOCK:
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                str(py), str(HERE / "transcribe_call.py"),
+                "--rec-dir", str(rec_dir), "--dnd-dir", str(TRANSCRIBE_DIR),
+                "--out", str(out_json),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE)
+            try:
+                _, err = await asyncio.wait_for(proc.communicate(),
+                                                timeout=TRANSCRIBE_TIMEOUT)
+            except asyncio.TimeoutError:
+                proc.kill()
+                raise RuntimeError("таймаут расшифровки")
+            if proc.returncode != 0:
+                tail = err.decode("utf-8", "replace").strip().splitlines()[-3:]
+                raise RuntimeError("; ".join(tail) or f"код {proc.returncode}")
+            replies = json.loads(out_json.read_text(encoding="utf-8"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"[call] расшифровка звонка {call_id} не удалась: {exc}")
+            conn = store.connect()
+            try:
+                store.add_message(conn, chat_id, author_kind="system",
+                                  author_user_id=None, author_name="система",
+                                  thread_root_id=root_id,
+                                  text=f"Расшифровка не удалась: {exc}")
+            finally:
+                conn.close()
+            return
+    conn = store.connect()
+    try:
+        for r in replies:
+            uid = r.get("uid")
+            name = r.get("name") or f"id{uid}"
+            try:
+                name = store.get_user(conn, uid)["display_name"]
+            except store.StoreError:
+                pass
+            store.add_message(conn, chat_id, author_kind="user",
+                              author_user_id=uid, author_name=name,
+                              thread_root_id=root_id, text=r.get("text") or "")
+    finally:
+        conn.close()
+    print(f"[call] расшифровка звонка {call_id}: {len(replies)} реплик в треде")
+
+
+def _calls_field(conn, user: dict) -> dict:
+    out = {}
+    for cid, room in list(CALLS.items()):
+        try:
+            chat = store.get_chat(conn, cid)
+        except store.StoreError:
+            continue
+        if store.chat_visible(conn, chat, user):
+            out[str(cid)] = {"users": sorted(room.peers),
+                             "started_by": room.started_by}
+    return out
+
+
+@app.get("/api/call/ice")
+async def api_call_ice(request: Request):
+    raw = os.environ.get("GD_ICE_JSON")
+    if raw:
+        try:
+            return json.loads(raw)
+        except ValueError:
+            pass
+    # Несколько STUN через запятую: гугловский из части российских сетей не
+    # отвечает (выяснено дампом webrtc-internals — ни одного srflx-кандидата).
+    stun_urls = [u.strip() for u in os.environ.get(
+        "GD_STUN_URL",
+        "stun:stun.cloudflare.com:3478,stun:stun.sipnet.ru:3478,"
+        "stun:stun.l.google.com:19302").split(",") if u.strip()]
+    servers: list[dict] = [{"urls": stun_urls}]
+    turn = os.environ.get("GD_TURN_URL")
+    if turn:
+        servers.append({"urls": turn,
+                        "username": os.environ.get("GD_TURN_USER", ""),
+                        "credential": os.environ.get("GD_TURN_PASS", "")})
+    return {"iceServers": servers}
+
+
+@app.websocket("/api/call/ws")
+async def call_ws(ws: WebSocket, chat: int):
+    # AuthMiddleware пропускает websocket-scope — авторизуемся сами по куке.
+    await ws.accept()
+    conn = store.connect()
+    try:
+        user = store.user_by_token(conn, ws.cookies.get(AUTH_COOKIE, ""))
+        if user is None:
+            await ws.close(code=4401)
+            return
+        try:
+            chat_row = store.require_chat(conn, chat, user)
+        except store.StoreError:
+            chat_row = None
+        if chat_row is None or chat_row["kind"] == "agent":
+            await ws.close(code=4403)
+            return
+    finally:
+        conn.close()
+    uid = user["id"]
+
+    room = CALLS.get(chat)
+    if room is None:
+        conn = store.connect()
+        try:
+            call_id = store.create_call(conn, chat, user)
+            store.add_message(conn, chat, author_kind="system",
+                              author_user_id=uid, author_name="система",
+                              text=f"{user['display_name']} начал(а) звонок")
+        finally:
+            conn.close()
+        room = CallRoom(call_id=call_id, chat_id=chat, started_by=uid,
+                        started_mono=time.monotonic())
+        CALLS[chat] = room
+
+    async with room.lock:
+        old = room.peers.get(uid)
+        if old is not None:
+            # Дубль-вкладка или F5: старый сокет вытесняется, peer заменяется.
+            room.peers.pop(uid, None)
+            try:
+                await old.ws.close(code=4000)
+            except Exception:
+                pass
+        if room.finalize_task is not None:
+            room.finalize_task.cancel()
+            room.finalize_task = None
+        session = room.sessions.get(uid, 0) + 1
+        room.sessions[uid] = session
+        peer = CallPeer(user_id=uid, name=user["display_name"], ws=ws,
+                        session=session)
+        room.peers[uid] = peer
+        room.names[uid] = user["display_name"]
+        room.joins.append({"uid": uid, "session": session,
+                           "name": user["display_name"],
+                           "offset": round(time.monotonic() - room.started_mono, 3)})
+        _write_call_meta(room)
+        await _call_send(peer, {
+            "t": "joined", "call_id": room.call_id, "self": uid,
+            "session": session,
+            "peers": [{"id": p.user_id, "name": p.name, "muted": p.muted,
+                       "sharing": p.sharing}
+                      for p in room.peers.values() if p.user_id != uid]})
+        await _call_broadcast(room, {
+            "t": "peer-joined",
+            "peer": {"id": uid, "name": peer.name, "muted": False,
+                     "sharing": False}}, skip=uid)
+
+    try:
+        while True:
+            msg = await ws.receive_json()
+            t = msg.get("t")
+            if t == "signal":
+                target = room.peers.get(int(msg.get("to") or 0))
+                if target is not None:
+                    await _call_send(target, {"t": "signal", "from": uid,
+                                              "data": msg.get("data")})
+            elif t == "state":
+                async with room.lock:
+                    if bool(msg.get("sharing")) and not peer.sharing:
+                        for p in room.peers.values():
+                            if p.sharing and p.user_id != uid:
+                                p.sharing = False
+                                await _call_send(p, {"t": "stop-share"})
+                    peer.muted = bool(msg.get("muted"))
+                    peer.sharing = bool(msg.get("sharing"))
+                    await _call_broadcast(room, {
+                        "t": "state", "id": uid, "muted": peer.muted,
+                        "sharing": peer.sharing}, skip=uid)
+            elif t == "ping":
+                await ws.send_json({"t": "pong"})
+    except (WebSocketDisconnect, RuntimeError, ValueError, KeyError):
+        pass  # разрыв или мусор в сообщении — просто выходим из звонка
+    finally:
+        async with room.lock:
+            if room.peers.get(uid) is peer:   # не сносить peer нового сокета
+                room.peers.pop(uid, None)
+                await _call_broadcast(room, {"t": "peer-left", "id": uid})
+                if not room.peers and CALLS.get(chat) is room:
+                    room.finalize_task = asyncio.create_task(_finalize_later(room))
+
+
+@app.post("/api/messages/{msg_id}/transcribe")
+async def api_msg_transcribe(msg_id: int, request: Request):
+    """Расшифровка старого звонка по его системному сообщению (#88):
+    call_id восстанавливается из вложений-дорожек, реплики лягут в тред."""
+    user = me(request)
+    conn = store.connect()
+    try:
+        msg = store.get_message(conn, msg_id)
+        store.require_chat(conn, msg["chat_id"], user)
+        call_id = None
+        for a in msg.get("attachments") or []:
+            if not a.get("upload_id"):
+                continue
+            up = store.get_upload(conn, a["upload_id"])
+            m = re.match(r"calls/(\d+)/", up["vault_path"].replace("\\", "/"))
+            if m:
+                call_id = int(m.group(1))
+                break
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    if msg["author_kind"] != "system" or call_id is None:
+        return JSONResponse({"error": "это не сообщение о звонке"},
+                            status_code=400)
+    if msg.get("reply_count"):
+        return JSONResponse({"error": "в треде уже есть сообщения — похоже,"
+                             " расшифровка уже была"}, status_code=409)
+    if call_id in _TRANSCRIBE_ACTIVE:
+        return JSONResponse({"error": "расшифровка уже идёт"}, status_code=409)
+    py = TRANSCRIBE_DIR / "venv" / "Scripts" / "python.exe"
+    if not py.is_file():
+        return JSONResponse({"error": "пайплайн расшифровки не настроен"
+                             " (GD_TRANSCRIBE_DIR)"}, status_code=400)
+    _spawn_transcribe(call_id, msg["chat_id"], msg_id)
+    return {"ok": True}
+
+
+@app.post("/api/call/{call_id}/rec")
+async def api_call_rec(call_id: int, request: Request,
+                       session: int = 1, seq: int = 0):
+    """Чанк записи микрофона: тело — сырые байты webm от MediaRecorder.
+    Клиент шлёт строго последовательно, сервер append-ит; идемпотентно по seq."""
+    user = me(request)
+    room = next((r for r in CALLS.values() if r.call_id == call_id), None)
+    if room is None:
+        return JSONResponse({"error": "звонок завершён"}, status_code=409)
+    conn = store.connect()
+    try:
+        store.require_chat(conn, room.chat_id, user)
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    body = await request.body()
+    if len(body) > MAX_REC_CHUNK:
+        return JSONResponse({"error": "чанк записи слишком большой"},
+                            status_code=413)
+    key = (user["id"], session)
+    last = room.rec_seq.get(key, -1)
+    if seq <= last:
+        return {"ok": True, "last": last}   # ретрай уже принятого чанка
+    if seq > last + 1:
+        print(f"[call] пропуск в записи: call={call_id} user={user['id']}"
+              f" session={session} seq={seq}, ждали {last + 1}")
+        return JSONResponse({"ok": False, "last": last}, status_code=409)
+    rec_dir = CALLS_DIR / str(call_id)
+    rec_dir.mkdir(parents=True, exist_ok=True)
+    with open(rec_dir / f"{user['id']}_{session}.webm", "ab") as f:
+        f.write(body)
+    room.rec_seq[key] = seq
+    return {"ok": True, "last": seq}
 
 
 # --------------------------------------------------------------- канбан задач

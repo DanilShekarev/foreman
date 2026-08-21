@@ -63,6 +63,28 @@ const SOUND = (() => {
     // ошибка — «Двойной вниз»
     error(){ tone(311, {type: "triangle", dur: .12, v: .3});
              tone(233, {type: "triangle", at: .14, dur: .25, v: .3}); },
+    // вход в звонок — восходящая пара, выход — нисходящая
+    callJoin(){ tone(440, {dur: .1, v: .3});
+                tone(660, {at: .1, dur: .18, v: .3}); },
+    callLeave(){ tone(660, {dur: .1, v: .3});
+                 tone(440, {at: .1, dur: .18, v: .3}); },
+  };
+
+  // Рингтон входящего звонка: повторяющийся «тили-тили», пока не ringStop().
+  let ringTimer = null;
+  function ringOnce(){
+    tone(880, {dur: .12, v: .35});
+    tone(1109, {at: .14, dur: .12, v: .35});
+    tone(880, {at: .32, dur: .12, v: .35});
+    tone(1109, {at: .46, dur: .18, v: .35});
+  }
+  S.ring = () => {
+    if (ringTimer) return;
+    ringOnce();
+    ringTimer = setInterval(ringOnce, 2200);
+  };
+  S.ringStop = () => {
+    if (ringTimer){ clearInterval(ringTimer); ringTimer = null; }
   };
 
   return {

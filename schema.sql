@@ -65,6 +65,10 @@ CREATE TABLE IF NOT EXISTS messages (
     reply_to_id     INTEGER  -- ответ в ленте (как в ТГ), не тред
 );
 CREATE INDEX IF NOT EXISTS idx_messages_chat ON messages(chat_id, id);
+-- Лента «Активность» (#82): выборка ответов на мои сообщения и упоминаний
+-- меня бегает каждый поллинг — без индексов это фулскан messages/mentions.
+CREATE INDEX IF NOT EXISTS idx_messages_reply ON messages(reply_to_id)
+    WHERE reply_to_id IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS reactions (
     message_id INTEGER NOT NULL REFERENCES messages(id),
@@ -79,6 +83,7 @@ CREATE TABLE IF NOT EXISTS mentions (
     user_id    INTEGER NOT NULL REFERENCES users(id),
     PRIMARY KEY (message_id, user_id)
 );
+CREATE INDEX IF NOT EXISTS idx_mentions_user ON mentions(user_id, message_id);
 
 CREATE TABLE IF NOT EXISTS chat_reads (
     chat_id              INTEGER NOT NULL REFERENCES chats(id),
@@ -214,4 +219,14 @@ CREATE TABLE IF NOT EXISTS uploads (
     orig_name  TEXT NOT NULL,
     vault_path TEXT NOT NULL,
     created_at TEXT NOT NULL
+);
+
+-- История созвонов (#86). Активное состояние комнат — в памяти процесса
+-- (server.py: CALLS); здесь только факт звонка и его записи через uploads.
+CREATE TABLE IF NOT EXISTS calls (
+    id         INTEGER PRIMARY KEY,
+    chat_id    INTEGER NOT NULL REFERENCES chats(id),
+    started_by INTEGER NOT NULL REFERENCES users(id),
+    started_at TEXT NOT NULL,
+    ended_at   TEXT     -- NULL = не финализирован (добивается при старте сервера)
 );

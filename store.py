@@ -538,6 +538,65 @@ def thread_mention_roots(conn: sqlite3.Connection, chat_id: int,
         (user["id"], chat_id, last_read))]
 
 
+# Лента «Активность» (#82): события, адресованные пользователю, — @упоминания
+# и ответы (reply) на его сообщения — по всем видимым ему чатам. Прочитанность
+# выводится из chat_reads: событие прочитано, если его id не новее отметки
+# чтения чата; отдельная таблица не нужна. Сообщение может быть и упоминанием,
+# и ответом сразу — MIN(kind) отдаёт приоритет 'mention' (< 'reply').
+_ACTIVITY_CTE = (
+    "WITH visible AS ("
+    " SELECT c.id, c.kind, c.title,"
+    "        COALESCE(r.last_read_message_id, 0) AS last_read"
+    " FROM chats c"
+    " LEFT JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = :uid"
+    " LEFT JOIN chat_reads r ON r.chat_id = c.id AND r.user_id = :uid"
+    " WHERE c.archived_at IS NULL"
+    "   AND (cm.user_id IS NOT NULL"
+    "        OR (c.kind = 'channel' AND c.is_private = 0))"
+    "), ev AS ("
+    " SELECT message_id AS id, 'mention' AS kind"
+    "  FROM mentions WHERE user_id = :uid"
+    " UNION"
+    " SELECT m2.id, 'reply' FROM messages m2"
+    "  JOIN messages orig ON orig.id = m2.reply_to_id"
+    "  WHERE orig.author_kind = 'user' AND orig.author_user_id = :uid"
+    ")")
+_ACTIVITY_FROM = (
+    " FROM ev JOIN messages m ON m.id = ev.id"
+    " JOIN visible v ON v.id = m.chat_id"
+    " WHERE m.deleted_at IS NULL AND m.status = 'final'"
+    "   AND NOT (m.author_kind = 'user' AND m.author_user_id = :uid)")
+
+
+def activity(conn: sqlite3.Connection, user: dict, limit: int = 50) -> dict:
+    """События для пользователя, новые сверху, + счётчик непрочитанных."""
+    rows = conn.execute(
+        _ACTIVITY_CTE +
+        " SELECT m.id, MIN(ev.kind) AS kind, m.chat_id, m.author_kind,"
+        "        m.author_name, substr(m.text, 1, 400) AS text,"
+        "        m.thread_root_id, m.created_at, v.kind AS chat_kind,"
+        "        CASE WHEN v.kind = 'dm' THEN COALESCE(("
+        "          SELECT u.display_name FROM chat_members cm2"
+        "          JOIN users u ON u.id = cm2.user_id"
+        "          WHERE cm2.chat_id = v.id AND cm2.user_id != :uid), 'ЛС')"
+        "        ELSE v.title END AS chat_title,"
+        "        (m.id <= v.last_read) AS read" +
+        _ACTIVITY_FROM +
+        " GROUP BY m.id ORDER BY m.id DESC LIMIT :lim",
+        {"uid": user["id"], "lim": limit}).fetchall()
+    return {"events": [dict(r) for r in rows],
+            "unread": activity_unread(conn, user)}
+
+
+def activity_unread(conn: sqlite3.Connection, user: dict) -> int:
+    """Сколько непрочитанных событий — бейдж «Активности» в поллинге."""
+    row = conn.execute(
+        _ACTIVITY_CTE + " SELECT COUNT(DISTINCT m.id) AS n" +
+        _ACTIVITY_FROM + " AND m.id > v.last_read",
+        {"uid": user["id"]}).fetchone()
+    return row["n"]
+
+
 def chat_reads_info(conn: sqlite3.Connection, chat_id: int) -> list[dict]:
     """Кто из участников до какого сообщения дочитал и когда (для галочек
     и списка «кто прочитал»)."""
@@ -1475,3 +1534,26 @@ def get_upload(conn: sqlite3.Connection, upload_id: int) -> dict:
     if row is None:
         raise NotFound("нет такого файла")
     return dict(row)
+
+
+# --------------------------------------------------------------- звонки
+
+def create_call(conn: sqlite3.Connection, chat_id: int, user: dict) -> int:
+    with write_tx(conn):
+        cur = conn.execute(
+            f"INSERT INTO calls(chat_id, started_by, started_at)"
+            f" VALUES (?,?,{NOW_SQL})", (chat_id, user["id"]))
+        return cur.lastrowid
+
+
+def end_call(conn: sqlite3.Connection, call_id: int) -> None:
+    with write_tx(conn):
+        conn.execute(f"UPDATE calls SET ended_at = {NOW_SQL}"
+                     " WHERE id = ? AND ended_at IS NULL", (call_id,))
+
+
+def unfinished_calls(conn: sqlite3.Connection) -> list[dict]:
+    """Звонки, оборванные рестартом сервера, — финализируются в lifespan."""
+    rows = conn.execute(
+        "SELECT * FROM calls WHERE ended_at IS NULL ORDER BY id").fetchall()
+    return [dict(r) for r in rows]
