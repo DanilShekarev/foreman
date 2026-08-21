@@ -37,6 +37,10 @@ const MD = (() => {
     // слов, HTML-сущностей (&#39;) и hex-цветов #fff (там не только цифры).
     s = s.replace(/(?<![\w&#])#(\d+)\b/g, (m, id) =>
       `<span class="card-link" data-card="${id}">#${id}</span>`);
+    // Ссылка на сообщение: m123 — нотация, которой агент адресует сообщения
+    // (см. prompts.channel_context). Клик ведёт к сообщению в ленте.
+    s = s.replace(/(?<![\w&#])m(\d+)\b/g, (x, id) =>
+      `<span class="msg-link" data-msg="${id}">m${id}</span>`);
     return s;
   }
 
@@ -90,10 +94,17 @@ const MD = (() => {
 // MD.render (лента, тред, панель канбана), без ручной привязки после
 // вставки HTML; к моменту клика KANBAN уже точно загружен.
 document.addEventListener("click", e => {
+  // KANBAN/CHAT — top-level const, в window они НЕ попадают — только typeof.
+  const ml = e.target.closest(".msg-link");
+  if (ml){
+    e.preventDefault();
+    if (typeof CHAT !== "undefined" && CHAT.jumpToMsg)
+      CHAT.jumpToMsg(+ml.dataset.msg);
+    return;
+  }
   const el = e.target.closest(".card-link");
   if (!el) return;
   e.preventDefault();
-  // KANBAN — top-level const, в window он НЕ попадает — только typeof.
   if (typeof KANBAN !== "undefined" && KANBAN.openCard)
     KANBAN.openCard(+el.dataset.card);
 });

@@ -228,7 +228,7 @@ const APP = (() => {
       body: JSON.stringify({kind: "dm", user_id: userId}),
     });
     const data = await r.json();
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ showAlert(data.error); return; }
     await refreshChats();
     selectChat(data.id);
   }
@@ -274,14 +274,14 @@ const APP = (() => {
   async function joinChannel(c){
     const r = await fetch(`api/chats/${c.id}/join`, {method: "POST"});
     const data = await r.json().catch(() => ({}));
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ showAlert(data.error); return; }
     await refreshChats();
   }
 
   async function leaveChannel(c){
     const r = await fetch(`api/chats/${c.id}/leave`, {method: "POST"});
     const data = await r.json().catch(() => ({}));
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ showAlert(data.error); return; }
     await refreshChats();
   }
 
@@ -290,7 +290,7 @@ const APP = (() => {
     if (!confirm(`Удалить сессию «${c.title}» со всей историей?`)) return;
     const r = await fetch(`api/chats/${c.id}`, {method: "DELETE"});
     const data = await r.json().catch(() => ({}));
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ showAlert(data.error); return; }
     localStorage.removeItem("gd_draft_" + c.id);
     if (CHAT.currentId() === c.id) afterChatDeleted();
     else refreshChats();
@@ -330,13 +330,55 @@ const APP = (() => {
   function closeModal(){ modalBack.style.display = "none"; }
   modalBack.onclick = e => { if (e.target === modalBack) closeModal(); };
 
+  // Свой alert вместо стокового: отдельный слой ПОВЕРХ обычных модалок —
+  // ошибка может всплыть, пока открыта модалка, и не должна затирать её
+  // содержимое. Возвращает Promise, резолвится по закрытию.
+  function showAlert(message, title = ""){
+    return new Promise(resolve => {
+      let back = document.getElementById("alert-back");
+      if (!back){
+        back = document.createElement("div");
+        back.id = "alert-back";
+        back.innerHTML = `<div id="alert-box" role="alertdialog">
+          <div id="alert-title"></div>
+          <div id="alert-text"></div>
+          <div class="row"><button id="alert-ok" class="btn-primary">Понятно</button></div>
+        </div>`;
+        document.body.appendChild(back);
+      }
+      const titleEl = back.querySelector("#alert-title");
+      titleEl.textContent = title;
+      titleEl.style.display = title ? "" : "none";
+      back.querySelector("#alert-text").textContent = String(message ?? "");
+      back.style.display = "flex";
+      const ok = back.querySelector("#alert-ok");
+      const done = () => {
+        back.style.display = "none";
+        document.removeEventListener("keydown", onKey, true);
+        resolve();
+      };
+      // capture + stopPropagation: Esc закрывает только alert, а не модалку,
+      // панель канбана или тред под ним.
+      const onKey = e => {
+        if (e.key !== "Escape" && e.key !== "Enter") return;
+        e.stopPropagation();
+        e.preventDefault();
+        done();
+      };
+      document.addEventListener("keydown", onKey, true);
+      ok.onclick = done;
+      back.onclick = e => { if (e.target === back) done(); };
+      ok.focus();
+    });
+  }
+
   document.getElementById("btn-new-agent").onclick = async () => {
     const r = await fetch("api/chats", {
       method: "POST", headers: {"Content-Type": "application/json"},
       body: JSON.stringify({kind: "agent"}),
     });
     const data = await r.json();
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ showAlert(data.error); return; }
     await refreshChats();
     selectChat(data.id);
   };
@@ -366,7 +408,7 @@ const APP = (() => {
       });
       const data = await r.json();
       closeModal();
-      if (data.error){ alert(data.error); return; }
+      if (data.error){ showAlert(data.error); return; }
       await refreshChats();
       selectChat(data.id);
     };
@@ -388,7 +430,7 @@ const APP = (() => {
       });
       const data = await r.json();
       closeModal();
-      if (data.error){ alert(data.error); return; }
+      if (data.error){ showAlert(data.error); return; }
       await refreshChats();
       selectChat(data.id);
     });
@@ -527,7 +569,7 @@ const APP = (() => {
           body: JSON.stringify({password: pw}),
         });
         const data = await r.json();
-        alert(data.error || "пароль обновлён");
+        showAlert(data.error || "пароль обновлён");
       };
       row.querySelector(".b-off").onclick = async () => {
         await fetch(`api/admin/users/${id}`, {
@@ -555,7 +597,7 @@ const APP = (() => {
     modal.querySelector("#m-invite").onclick = async () => {
       const r = await fetch("api/admin/invites", {method: "POST"});
       const data = await r.json();
-      if (data.error){ alert(data.error); return; }
+      if (data.error){ showAlert(data.error); return; }
       openAdmin();
     };
   }
@@ -658,5 +700,5 @@ const APP = (() => {
 
   boot();
   return { refreshChats, showVault, selectChat, pickFromList, afterChatDeleted,
-           openContextMenu, rerenderLists: renderChatLists };
+           openContextMenu, rerenderLists: renderChatLists, alert: showAlert };
 })();

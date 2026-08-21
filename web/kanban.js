@@ -157,7 +157,7 @@ const KANBAN = (() => {
         body: JSON.stringify({title, column: colKey}),
       });
       const card = await r.json().catch(() => ({}));
-      if (card.error){ alert(card.error); return; }
+      if (card.error){ APP.alert(card.error); return; }
       cards.set(card.id, card);
       sync();
     };
@@ -424,7 +424,7 @@ const KANBAN = (() => {
     });
     const resp = await r.json().catch(() => ({}));
     if (resp.error){
-      alert(resp.error);
+      APP.alert(resp.error);
       await refresh();
       return null;
     }
@@ -910,7 +910,7 @@ const KANBAN = (() => {
           method: "PATCH", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({done: !!it.done}),
         }).then(x => x.json()).catch(() => ({}));
-        if (resp.error){ alert(resp.error); reloadPanel(); return; }
+        if (resp.error){ APP.alert(resp.error); reloadPanel(); return; }
         const card = cards.get(c.id);
         if (card){
           card.checklist_done = c.checklist.filter(i => i.done).length;
@@ -922,7 +922,7 @@ const KANBAN = (() => {
         const resp = await fetch(`api/kanban/checklist/${it.id}`,
                                  {method: "DELETE"})
           .then(x => x.json()).catch(() => ({}));
-        if (resp.error) alert(resp.error);
+        if (resp.error) APP.alert(resp.error);
         await refresh();
         reloadPanel();
       };
@@ -938,7 +938,7 @@ const KANBAN = (() => {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text}),
       }).then(x => x.json()).catch(() => ({}));
-      if (resp.error){ alert(resp.error); return; }
+      if (resp.error){ APP.alert(resp.error); return; }
       await refresh();
       await reloadPanel();
       view.querySelector("#kb-p-check-new")?.focus();
@@ -973,7 +973,7 @@ const KANBAN = (() => {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({text}),
       }).then(x => x.json()).catch(() => ({}));
-      if (resp.error){ alert(resp.error); return; }
+      if (resp.error){ APP.alert(resp.error); return; }
       await refresh();
       reloadPanel();
     };
@@ -1036,13 +1036,13 @@ const KANBAN = (() => {
           method: "PATCH", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({name: input.value}),
         }).then(x => x.json()).catch(() => ({}));
-        if (resp.error) alert(resp.error);
+        if (resp.error) APP.alert(resp.error);
       };
       rowEl.querySelector(".kb-lab-del").onclick = async () => {
         if (!confirm("Удалить метку со всех карточек?")) return;
         const resp = await fetch(`api/kanban/labels/${id}`, {method: "DELETE"})
           .then(x => x.json()).catch(() => ({}));
-        if (resp.error){ alert(resp.error); return; }
+        if (resp.error){ APP.alert(resp.error); return; }
         labels = labels.filter(l => l.id !== id);
         rowEl.remove();
       };
@@ -1053,7 +1053,7 @@ const KANBAN = (() => {
           method: "PATCH", headers: {"Content-Type": "application/json"},
           body: JSON.stringify({color: sw.dataset.color}),
         }).then(x => x.json()).catch(() => ({}));
-        if (resp.error){ alert(resp.error); return; }
+        if (resp.error){ APP.alert(resp.error); return; }
         sw.parentElement.querySelectorAll(".kb-swatch")
           .forEach(x => x.classList.toggle("on", x === sw));
       };
@@ -1065,7 +1065,7 @@ const KANBAN = (() => {
         method: "POST", headers: {"Content-Type": "application/json"},
         body: JSON.stringify({name}),
       }).then(x => x.json()).catch(() => ({}));
-      if (resp.error){ alert(resp.error); return; }
+      if (resp.error){ APP.alert(resp.error); return; }
       labels.push(resp);
       labelsModal();  // перерисовать список
       back.style.display = "";
@@ -1085,7 +1085,7 @@ const KANBAN = (() => {
   // карточку. Если такой (неархивной) карточки нет — сообщить об этом.
   async function openCard(id){
     await open();
-    if (!cards.has(id)){ alert(`Задача #${id} не найдена (или в архиве)`); return; }
+    if (!cards.has(id)){ APP.alert(`Задача #${id} не найдена (или в архиве)`); return; }
     openPanel(id);
   }
 

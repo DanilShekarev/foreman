@@ -222,7 +222,7 @@ const CHAT = (() => {
       body: JSON.stringify({model: modelSel.value}),
     });
     const data = await r.json().catch(() => ({}));
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ APP.alert(data.error); return; }
     current.model = modelSel.value || null;
   };
 
@@ -366,7 +366,7 @@ const CHAT = (() => {
     if (bp) bp.onclick = async () => {
       const r = await fetch(`api/messages/${m.id}/pin`, {method: "POST"});
       const data = await r.json().catch(() => ({}));
-      if (data.error) alert(data.error);
+      if (data.error) APP.alert(data.error);
       refetch();
     };
     if (m.pinned_at) div.classList.add("pinned");
@@ -452,10 +452,24 @@ const CHAT = (() => {
 
   function jumpToMessage(id){
     const div = messagesEl.querySelector(`.msg[data-id="${id}"]`);
-    if (!div) return;
+    if (!div) return false;
     div.scrollIntoView({block: "center"});
     div.classList.add("flash");
     setTimeout(() => div.classList.remove("flash"), 1600);
+    return true;
+  }
+
+  // Переход по ссылке m123 (md.js): сообщение может быть старше загруженного
+  // окна ленты — тогда расширяем окно до максимума и пробуем ещё раз.
+  async function jumpToMsg(id){
+    if (jumpToMessage(id)) return;
+    if (!histEnd && histLimit < 1000){
+      histLimit = 1000;
+      await refetch();
+    }
+    if (!jumpToMessage(id))
+      APP.alert(`Сообщение m${id} не найдено в ленте — возможно, оно в треде,` +
+            ` другом чате или удалено`);
   }
 
   // ------------------------------------------------------ контекстное меню
@@ -490,7 +504,7 @@ const CHAT = (() => {
                 act: async () => {
                   const r = await fetch(`api/messages/${m.id}/pin`, {method: "POST"});
                   const data = await r.json().catch(() => ({}));
-                  if (data.error) alert(data.error);
+                  if (data.error) APP.alert(data.error);
                   refetch();
                 }});
     if (own && current && current.kind !== "agent")
@@ -499,7 +513,7 @@ const CHAT = (() => {
       items.push({icon: ICON("thread", "sm"), label: "Цепочку — в тред", act: async () => {
         const r = await fetch(`api/messages/${m.id}/to-thread`, {method: "POST"});
         const data = await r.json().catch(() => ({}));
-        if (data.error){ alert(data.error); return; }
+        if (data.error){ APP.alert(data.error); return; }
         refetch();
         if (data.root) openThread(data.root);
       }});
@@ -545,7 +559,7 @@ const CHAT = (() => {
         body: JSON.stringify({text}),
       });
       const data = await r.json().catch(() => ({}));
-      if (data.error){ alert(data.error); return; }
+      if (data.error){ APP.alert(data.error); return; }
       cancel();
       refetch();
       if (threadRoot) refetchThread();
@@ -560,7 +574,7 @@ const CHAT = (() => {
     if (!confirm("Удалить сообщение?")) return;
     const r = await fetch(`api/messages/${m.id}`, {method: "DELETE"});
     const data = await r.json().catch(() => ({}));
-    if (data.error) alert(data.error);
+    if (data.error) APP.alert(data.error);
     refetch();
     if (threadRoot) refetchThread();
   }
@@ -800,7 +814,7 @@ const CHAT = (() => {
       if (!confirm("Откатить правки этого хода агента?")) return;
       const r = await fetch(`api/turn/${turn.id}/revert`, {method: "POST"});
       const data = await r.json();
-      if (data.error) alert(data.error);
+      if (data.error) APP.alert(data.error);
       refetch();
       VAULT.refreshTree();
     };
@@ -824,7 +838,7 @@ const CHAT = (() => {
       if (!resp.ok){
         const err = await resp.json().catch(() => ({}));
         SOUND.error();
-        alert(err.error || `ошибка ${resp.status}`);
+        APP.alert(err.error || `ошибка ${resp.status}`);
         return;
       }
       SOUND.send();
@@ -943,14 +957,14 @@ const CHAT = (() => {
 
   // Общая загрузка файлов (кнопка, drag&drop, Ctrl+V) в один из композеров.
   async function uploadFilesTo(files, list, chipsEl){
-    if (!current){ alert("сначала выберите чат"); return; }
+    if (!current){ APP.alert("сначала выберите чат"); return; }
     for (const f of files){
       const fd = new FormData();
       fd.append("file", f);
       const r = await fetch(`api/chats/${current.id}/upload`,
                             {method: "POST", body: fd});
       const data = await r.json();
-      if (data.error){ alert(`${f.name}: ${data.error}`); continue; }
+      if (data.error){ APP.alert(`${f.name}: ${data.error}`); continue; }
       list.push({upload_id: data.upload_id, title: data.title,
                  image: data.image});
       renderChips(chipsEl, list);
@@ -959,7 +973,7 @@ const CHAT = (() => {
 
   const fileInput = document.getElementById("file-input");
   document.getElementById("btn-attach").onclick = () => {
-    if (!current){ alert("сначала выберите чат"); return; }
+    if (!current){ APP.alert("сначала выберите чат"); return; }
     fileInput.click();
   };
   fileInput.onchange = async () => {
@@ -1217,7 +1231,7 @@ const CHAT = (() => {
     if (!confirm(`Удалить сессию «${current.title}» со всей историей?`)) return;
     const r = await fetch(`api/chats/${current.id}`, {method: "DELETE"});
     const data = await r.json().catch(() => ({}));
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ APP.alert(data.error); return; }
     localStorage.removeItem("gd_draft_" + current.id);
     current = null;
     APP.afterChatDeleted();
@@ -1318,7 +1332,7 @@ const CHAT = (() => {
     }
   }
 
-  return { open, onChanges, showTyping, updateReads, closeThread,
+  return { open, onChanges, showTyping, updateReads, closeThread, jumpToMsg,
            // Зов снаружи (закрытие доски задач): чат снова виден — прочитан.
            markVisible: () => { if (lastMsgId && chatVisible()) markRead(); },
            currentId: () => current && current.id };

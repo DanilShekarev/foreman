@@ -927,3 +927,21 @@ body.kb-dragging{cursor:grabbing;user-select:none}
 #model-select:hover{border-color:var(--border-strong);color:var(--fg)}
 .turn-model{color:var(--fg-faint);font-size:11px;border:1px solid var(--border);
   border-radius:999px;padding:0 6px;line-height:1.5}
+/* Ссылка на сообщение «m123» (md.js) — переход к сообщению, CHAT.jumpToMsg */
+.md .msg-link{color:var(--accent);cursor:pointer;
+  border-bottom:1px dashed color-mix(in srgb,var(--accent) 55%,transparent)}
+.md .msg-link:hover{border-bottom-style:solid}
+
+/* ============================================== свой alert (APP.alert) */
+/* Слой выше обычных модалок (#modal-back z=20): ошибка может всплыть
+   поверх открытой модалки и не должна затирать её содержимое. */
+#alert-back{position:fixed;inset:0;background:rgba(8,10,16,.45);
+  backdrop-filter:blur(2px);display:flex;align-items:center;
+  justify-content:center;z-index:45}
+#alert-box{background:var(--bg1);border:1px solid var(--border-strong);
+  border-radius:var(--radius);padding:20px 22px;min-width:300px;max-width:460px;
+  box-shadow:var(--shadow-3)}
+#alert-title{font-weight:600;font-size:14px;margin-bottom:8px}
+#alert-text{color:var(--fg-dim);white-space:pre-wrap;word-break:break-word;
+  line-height:1.55}
+#alert-box .row{display:flex;justify-content:flex-end;margin-top:16px}

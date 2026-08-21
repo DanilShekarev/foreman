@@ -29,7 +29,7 @@ const VAULT = (() => {
     const r = await fetch(`api/vault/upload_image?doc=${encodeURIComponent(currentPath)}`,
                           {method: "POST", body: fd});
     const data = await r.json().catch(() => ({error: "ошибка загрузки картинки"}));
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ APP.alert(data.error); return; }
     callback(data.rel, blob.name || "");
   }
 
@@ -201,7 +201,7 @@ const VAULT = (() => {
     if (data.error){
       // Тихое восстановление после перезагрузки: файл могли удалить.
       if (quiet) localStorage.removeItem("gd_last_doc");
-      else alert(data.error);
+      else APP.alert(data.error);
       return;
     }
     showDocPane(path);
@@ -286,7 +286,7 @@ const VAULT = (() => {
     });
     const data = await r.json();
     if (data.error){
-      alert(data.error + (data.conflict ? "\n(скопируйте свой текст, обновите документ и вставьте правки заново)" : ""));
+      APP.alert(data.error + (data.conflict ? "\n(скопируйте свой текст, обновите документ и вставьте правки заново)" : ""));
       return;
     }
     currentMtime = data.mtime;
@@ -335,7 +335,7 @@ const VAULT = (() => {
         const r = await fetch(`api/vault/resolve?name=${encodeURIComponent(el.dataset.wiki)}`);
         const data = await r.json();
         if (data.path) openDoc(data.path);
-        else alert(data.error || "не найдено");
+        else APP.alert(data.error || "не найдено");
       };
     });
   }
@@ -348,7 +348,7 @@ const VAULT = (() => {
     const r = await fetch("api/vault/upload?folder=shared", {method: "POST", body: fd});
     const data = await r.json();
     uploadInput.value = "";
-    if (data.error){ alert(data.error); return; }
+    if (data.error){ APP.alert(data.error); return; }
     await refreshTree();
     openDoc(data.path);
   };
@@ -359,7 +359,7 @@ const VAULT = (() => {
     if (!currentPath) return;
     const r = await fetch(`api/vault/history?path=${encodeURIComponent(currentPath)}`);
     const items = await r.json();
-    if (items.error){ alert(items.error); return; }
+    if (items.error){ APP.alert(items.error); return; }
     setEditing(false);
     const back = `<div class="hist-item" id="hist-back">${ICON("arrow-left", "sm")} к документу</div>`;
     viewEl.innerHTML = back + (items.map(h => `
@@ -381,7 +381,7 @@ const VAULT = (() => {
     const r = await fetch(`api/vault/export?path=${encodeURIComponent(currentPath)}`);
     if (!r.ok){
       const data = await r.json().catch(() => ({}));
-      alert(data.error || `ошибка ${r.status}`);
+      APP.alert(data.error || `ошибка ${r.status}`);
       return;
     }
     const blob = await r.blob();
