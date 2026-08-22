@@ -84,9 +84,30 @@ async def lifespan(app: FastAPI):
     if vaultlib.CODE_REPO is not None:
         import code_mirror
         mirror_task = asyncio.create_task(code_mirror.loop())
+    backup_task = None
+    backup_hours = float(os.environ.get("GD_BACKUP_HOURS", "24") or "0")
+    if backup_hours > 0:
+        from tools import backup as backup_tool
+
+        async def _backup_loop():
+            # Первый прогон вскоре после старта: домашний сервер могут
+            # перезапускать чаще, чем раз в сутки — иначе бэкап не случится.
+            delay = 600.0
+            while True:
+                await asyncio.sleep(delay)
+                delay = backup_hours * 3600
+                try:
+                    print("[backup] " +
+                          await asyncio.to_thread(backup_tool.run_backup))
+                except Exception as err:  # noqa: BLE001 — цикл не должен умирать
+                    print(f"[backup] ошибка: {type(err).__name__}: {err}")
+
+        backup_task = asyncio.create_task(_backup_loop())
     yield
     if mirror_task is not None:
         mirror_task.cancel()
+    if backup_task is not None:
+        backup_task.cancel()
     await manager.stop()
 
 

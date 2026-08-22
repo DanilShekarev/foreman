@@ -126,6 +126,7 @@ Highlights:
 | `GD_DB` / `GD_VAULT` | `data/gd.sqlite` / `vault/` | Data locations |
 | `GD_CODE_REPO` | — | Git repo the agent may read (empty = no code) |
 | `GD_CLAUDE_TOKEN_FILE` | `auth_token.txt` | Claude subscription token |
+| `GD_BACKUP_HOURS` / `GD_BACKUP_DIR` | `24` / `data/backups` | Automatic backups (DB snapshot, vault bundle, new files); `tools/backup.py` runs one manually |
 
 ## Architecture in one paragraph
 

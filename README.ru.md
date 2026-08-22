@@ -119,6 +119,7 @@ git config uploadpack.allowAnySHA1InWant true
 | `GD_DB` / `GD_VAULT` | `data/gd.sqlite` / `vault/` | Где лежат данные |
 | `GD_CODE_REPO` | — | Git-репозиторий для чтения агентом (пусто = без кода) |
 | `GD_CLAUDE_TOKEN_FILE` | `auth_token.txt` | Токен подписки Claude |
+| `GD_BACKUP_HOURS` / `GD_BACKUP_DIR` | `24` / `data/backups` | Автобэкапы (снимок базы, bundle волта, новые файлы); вручную — `tools/backup.py` |
 
 ## Архитектура одним абзацем
 
