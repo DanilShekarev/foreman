@@ -1,7 +1,10 @@
-fastapi
-uvicorn[standard]
-claude-agent-sdk
-python-multipart
-mammoth
-markdownify
-httpx2
+# Нижние границы — версии, на которых проект работает. Верхних нет намеренно:
+# claude-agent-sdk обновляется часто, а закрепление мажора устареет быстрее,
+# чем кто-то это заметит.
+fastapi>=0.115
+uvicorn[standard]>=0.30
+claude-agent-sdk>=0.2
+python-multipart>=0.0.9
+mammoth>=1.8
+markdownify>=1.1
+httpx2>=2.12

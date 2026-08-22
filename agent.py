@@ -176,7 +176,8 @@ class AgentSession:
                  model: str) -> ClaudeAgentOptions:
         access = self.access()
         write_guard, read_guard = _make_guards(access)
-        add_dirs = [str(vaultlib.unity_root())]  # зеркало main, не рабочая копия
+        code = vaultlib.code_root()  # зеркало ветки, не рабочая копия
+        add_dirs = [str(code)] if code is not None else []
         if self.chat_kind == "agent" and self.owner_login:
             add_dirs.append(str(VAULT / "personal" / self.owner_login))
         return ClaudeAgentOptions(

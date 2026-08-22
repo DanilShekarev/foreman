@@ -1,4 +1,4 @@
-"""Волт диздоков: раскладка, права видимости и записи путей.
+"""Волт (база знаний): раскладка, права видимости и записи путей.
 
 Единственный источник правил «кому какие пути можно» — им пользуются и
 PreToolUse-хуки агента, и HTTP-ручки, и дерево в UI. Раскладка:
@@ -7,7 +7,7 @@ PreToolUse-хуки агента, и HTTP-ручки, и дерево в UI. Р�
       shared/            — общая база, видят и правят все
         _assets/         — картинки из docx-импорта
       personal/<login>/  — личная область (владелец + админ)
-      UNITY_PROJECT_MAP.md — карта Unity-проекта для агента
+      CODE_MAP.md        — карта кодовой базы проекта для агента
 """
 from __future__ import annotations
 
@@ -15,23 +15,32 @@ import os
 import re
 from pathlib import Path
 
+import common  # noqa: F401  — .env должен загрузиться до чтения GD_* ниже
+
 HERE = Path(__file__).resolve().parent
 VAULT = Path(os.environ.get("GD_VAULT", str(HERE / "vault"))).resolve()
 # Рабочая копия программистов — источник зеркала, агент её НЕ читает.
-UNITY_PROJECT = Path(os.environ.get(
-    "GD_UNITY_PROJECT", r"D:\work\pixup\slopebuildergame")).resolve()
-# Зеркало ветки main (sparse-клон, синхронизирует unity_mirror.py):
+# Не задана — кодовой базы у агента нет вовсе, остаётся только волт.
+_code_repo = os.environ.get("GD_CODE_REPO", "").strip()
+CODE_REPO = Path(_code_repo).resolve() if _code_repo else None
+# Зеркало рабочей ветки (sparse-клон, синхронизирует code_mirror.py):
 # только закоммиченное, без рабочих правок и чужих веток.
-UNITY_MIRROR = Path(os.environ.get(
-    "GD_UNITY_MIRROR", str(HERE / "data" / "unity-mirror"))).resolve()
+CODE_MIRROR = Path(os.environ.get(
+    "GD_CODE_MIRROR", str(HERE / "data" / "code-mirror"))).resolve()
 
 
-def unity_root() -> Path:
+def code_root() -> Path | None:
     """Что читает агент: зеркало, когда оно уже склонировано, иначе (первый
-    запуск, пока идёт клон) — рабочая копия, как раньше."""
-    if (UNITY_MIRROR / "Assets").is_dir():
-        return UNITY_MIRROR
-    return UNITY_PROJECT
+    запуск, пока идёт клон) — рабочая копия. None — кода у агента нет."""
+    if CODE_REPO is None:
+        return None
+    if (CODE_MIRROR / ".git").is_dir():
+        try:
+            if any(p.name != ".git" for p in CODE_MIRROR.iterdir()):
+                return CODE_MIRROR
+        except OSError:
+            pass
+    return CODE_REPO
 
 MD_EXT = {".md", ".markdown", ".txt"}
 IMG_EXT = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"}
@@ -92,17 +101,20 @@ def can_write(user: dict, abs_path: Path) -> bool:
         return True
     if parts[0] == "personal":
         return len(parts) >= 2 and (parts[1] == user["login"] or bool(user.get("is_admin")))
-    # корень волта (UNITY_PROJECT_MAP.md и т.п.) — только админ
+    # корень волта (CODE_MAP.md и т.п.) — только админ
     return bool(user.get("is_admin"))
 
 
 def agent_scopes(chat_kind: str, owner_login: str | None) -> dict:
     """Области доступа агент-сессии по типу чата.
 
-    read: откуда можно читать (плюс Unity-проект — всегда read-only).
+    read: откуда можно читать (плюс кодовая база — всегда read-only).
     write: куда можно писать.
     """
-    read = [VAULT / "shared", VAULT / "UNITY_PROJECT_MAP.md", unity_root()]
+    read = [VAULT / "shared", VAULT / "CODE_MAP.md", VAULT / "PROJECT.md"]
+    code = code_root()
+    if code is not None:
+        read.append(code)
     write = [VAULT / "shared"]
     if chat_kind == "agent" and owner_login:
         personal = VAULT / "personal" / owner_login

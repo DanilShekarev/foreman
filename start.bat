@@ -1,5 +1,6 @@
 @echo off
-rem GD-ассистент: первый запуск сам создаёт venv и ставит зависимости.
+rem Foreman: первый запуск сам создаёт venv и ставит зависимости.
+rem Настройки — в файле .env (образец: .env.example).
 chcp 65001 >nul
 cd /d "%~dp0"
 
@@ -10,27 +11,5 @@ if not exist .venv (
     .venv\Scripts\python.exe -m pip install -r requirements.txt
 )
 
-rem 0.0.0.0 — доступ по офисной сети. Порт можно поменять через GD_PORT.
-set GD_HOST=0.0.0.0
-if "%GD_PORT%"=="" set GD_PORT=8010
-rem Публикация за Caddy под danishe.sbs/foreman (локальный доступ без префикса
-rem переменная не ломает — префикс срезается, только если реально пришёл).
-if "%GD_WEB_BASE%"=="" set GD_WEB_BASE=/foreman
-
-rem Созвоны: без TURN звонки ходят только при прямой видимости (LAN/простые
-rem NAT). Для удалённых участников поднять coturn и раскомментировать:
-rem set GD_TURN_URL=turn:danishe.sbs:3478
-rem set GD_TURN_USER=foreman
-rem set GD_TURN_PASS=пароль-из-turnserver.conf
-rem STUN по умолчанию stun.l.google.com:19302, свой — через GD_STUN_URL.
-
-rem Модели агента настраиваются в UI: админ -> Модели агента. Ключ провайдера
-rem можно не хранить в базе - в поле ключа написать env:ИМЯ_ПЕРЕМЕННОЙ,
-rem например env:OPENROUTER_API_KEY.
-
-rem Расшифровка созвонов: ASR-пайплайн dnd-transcribe (venv+модель GigaAM).
-rem Нет каталога — расшифровка тихо выключена, звонки работают как обычно.
-if "%GD_TRANSCRIBE_DIR%"=="" set GD_TRANSCRIBE_DIR=D:\Agent\dnd-transcribe
-
-.venv\Scripts\python.exe server.py --host %GD_HOST% --port %GD_PORT%
+.venv\Scripts\python.exe server.py
 pause

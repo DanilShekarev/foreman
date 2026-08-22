@@ -1,0 +1,15 @@
+name: Предложение
+description: Идея новой возможности или улучшения
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Какую задачу это решает
+      description: Опишите ситуацию, в которой сейчас неудобно, — это важнее готового решения.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Как вы это видите

@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
 """Расшифровка дорожек созвона (#88): каждый webm — один говорящий.
 
-Запускается сервером ПОД venv соседнего пайплайна dnd-transcribe
-(GD_TRANSCRIBE_DIR): оттуда берутся onnx_asr, конфиг с путями к ffmpeg и
-модели GigaAM и класс AsrEngine. Диаризации нет — дорожки уже пер-спикерные.
+Запускается сервером ПОД venv внешнего ASR-пайплайна (GD_TRANSCRIBE_DIR):
+оттуда берутся onnx_asr, конфиг с путями к ffmpeg и модели GigaAM и класс
+AsrEngine. Диаризации нет — дорожки уже пер-спикерные.
 Выход — JSON реплик для поста в тред: [{uid, name, start, text}, ...].
 
     venv\\Scripts\\python transcribe_call.py --rec-dir data/calls/4
-        --dnd-dir D:/Agent/dnd-transcribe --out data/calls/4/transcript.json
+        --dnd-dir path/to/asr-pipeline --out data/calls/4/transcript.json
 """
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def read_wav(path: Path) -> np.ndarray:
 def main() -> int:
     ap = argparse.ArgumentParser(description="Расшифровка дорожек созвона")
     ap.add_argument("--rec-dir", required=True, help="каталог с {uid}_{session}.webm и meta.json")
-    ap.add_argument("--dnd-dir", required=True, help="корень пайплайна dnd-transcribe")
+    ap.add_argument("--dnd-dir", required=True, help="корень ASR-пайплайна")
     ap.add_argument("--out", required=True, help="куда писать JSON реплик")
     args = ap.parse_args()
 

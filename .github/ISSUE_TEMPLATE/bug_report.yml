@@ -1,0 +1,22 @@
+name: Баг
+description: Что-то работает не так
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: Что случилось
+      description: Что вы делали, что ожидали и что произошло на самом деле.
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Лог сервера
+      description: Кусок вывода консоли сервера в момент ошибки, если есть.
+      render: text
+  - type: input
+    id: env
+    attributes:
+      label: Окружение
+      placeholder: "Windows 11 / Python 3.10 / движок агента: claude или openai"

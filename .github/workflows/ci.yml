@@ -1,0 +1,30 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  compile:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Установка зависимостей
+        run: pip install -r requirements.txt
+      - name: Компиляция всех модулей
+        run: python -m py_compile server.py store.py agent.py agent_openai.py agent_tools.py llm.py vaultlib.py gitops.py prompts.py docx_io.py common.py code_mirror.py transcribe_call.py add_user.py tools/gen_unity_map.py
+
+  hardcoded-paths:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Нет абсолютных Windows-путей в коде
+        run: |
+          ! grep -rn 'D:\' --include='*.py' --include='*.bat' --include='*.sh' .

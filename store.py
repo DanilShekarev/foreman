@@ -1,10 +1,11 @@
-"""Ядро gd-assist: SQLite + бизнес-логика, без FastAPI.
+"""Ядро Foreman: SQLite + бизнес-логика, без FastAPI.
 
 Дисциплина из проекта kanban: WAL, соединение на запрос, любая запись — внутри
 write_tx() (BEGIN IMMEDIATE), init_db() вызывается ВНЕ транзакции.
 """
 from __future__ import annotations
 
+import common  # noqa: F401  — .env должен загрузиться до чтения GD_* ниже
 import hashlib
 import json
 import os

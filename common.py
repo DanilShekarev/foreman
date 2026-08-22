@@ -1,5 +1,5 @@
-"""Общие утилиты (порт из agent-game/common.py): UTF-8 в консоли Windows,
-отключение QuickEdit, подписочная авторизация Agent SDK."""
+"""Общие утилиты: файл .env, UTF-8 в консоли Windows, отключение QuickEdit,
+подписочная авторизация Agent SDK."""
 from __future__ import annotations
 
 import os
@@ -15,6 +15,30 @@ for _stream in (sys.stdout, sys.stderr):
         _stream.reconfigure(encoding="utf-8", errors="replace")
     except (AttributeError, ValueError):
         pass
+
+
+def load_env() -> None:
+    """Настройки из .env рядом с server.py. Все GD_*-переменные читаются на
+    уровне модулей, поэтому файл должен подняться до их импорта — отсюда
+    `import common` первой строкой в точках входа. Реальное окружение
+    приоритетнее файла: переменная из консоли перебивает .env."""
+    env_file = Path(os.environ.get("GD_ENV_FILE") or ROOT / ".env")
+    if not env_file.is_file():
+        return
+    for line in env_file.read_text(encoding="utf-8-sig").splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        name, sep, value = line.partition("=")
+        if not sep:
+            continue
+        name = name.strip()
+        value = value.strip().strip('"').strip("'")
+        if name and name not in os.environ:
+            os.environ[name] = value
+
+
+load_env()
 
 
 def _disable_quickedit() -> None:
@@ -57,12 +81,12 @@ def setup_auth() -> str:
 
 
 def _token_paths() -> list[Path]:
-    """Где искать токен: явный путь из окружения, свой файл, затем общий файл
-    agent-game — токен один на все агентные проекты, секрет не дублируем."""
+    """Где искать токен: явный путь из окружения (GD_CLAUDE_TOKEN_FILE — если
+    токен общий на несколько агентных проектов, секрет не дублируется), затем
+    свой файл в корне."""
     paths = []
     explicit = os.environ.get("GD_CLAUDE_TOKEN_FILE")
     if explicit:
         paths.append(Path(explicit))
     paths.append(ROOT / "auth_token.txt")
-    paths.append(Path(r"D:\Agent\agent-game\auth_token.txt"))
     return paths

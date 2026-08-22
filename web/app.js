@@ -126,7 +126,7 @@ const APP = (() => {
   }
 
   // --------------------------------------------------------- нотификации
-  // Работают только по HTTPS (danishe.sbs/gd); на http-LAN кнопка скрыта,
+  // Работают только по HTTPS; на http-LAN кнопка скрыта,
   // остаётся бейдж в заголовке вкладки.
 
   const canNotify = "Notification" in window && window.isSecureContext;

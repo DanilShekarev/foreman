@@ -1,4 +1,4 @@
-"""gd-assist: сайт геймдизайнеров — чаты (каналы/ЛС/агент) + волт диздоков.
+"""Foreman: чаты команды (каналы/ЛС/агент) + база знаний под git.
 
 Запуск: python server.py [--host 0.0.0.0] [--port 8010]
 Один воркер uvicorn, без reload: агент-сессии живут в процессе.
@@ -71,19 +71,22 @@ async def lifespan(app: FastAPI):
         root_id, n_tracks = _finalize_call(c["id"], c["chat_id"], {})
         if n_tracks:
             _spawn_transcribe(c["id"], c["chat_id"], root_id)
-    # Карта Unity-проекта для агента: сеется из vault_seed при первом старте
-    # (сам волт в .gitignore — он отдельный репозиторий).
-    seed = HERE / "vault_seed" / "UNITY_PROJECT_MAP.md"
-    target = VAULT / "UNITY_PROJECT_MAP.md"
-    if seed.is_file() and not target.is_file():
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
+    # Профиль проекта и карта кода для агента: сеются из vault_seed при первом
+    # старте (сам волт в .gitignore — он отдельный репозиторий).
+    for seed in sorted((HERE / "vault_seed").glob("*.md")):
+        target = VAULT / seed.name
+        if not target.is_file():
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
     gitops.ensure_repo_sync()
     manager.start()
-    import unity_mirror
-    mirror_task = asyncio.create_task(unity_mirror.loop())
+    mirror_task = None
+    if vaultlib.CODE_REPO is not None:
+        import code_mirror
+        mirror_task = asyncio.create_task(code_mirror.loop())
     yield
-    mirror_task.cancel()
+    if mirror_task is not None:
+        mirror_task.cancel()
     await manager.stop()
 
 
@@ -1151,22 +1154,32 @@ async def _finalize_later(room: CallRoom) -> None:
 
 
 # --- расшифровка (#88): дорожки — реплики в тред под сообщением о звонке ---
-# ASR — GigaAM из соседнего пайплайна dnd-transcribe, его venv и его модель;
+# ASR — внешний пайплайн (onnx_asr + GigaAM) со своим venv и своей моделью;
 # у нас только скрипт-мост transcribe_call.py и пост реплик в тред.
+# GD_TRANSCRIBE_DIR не задан или каталога нет — расшифровка тихо выключена.
 
-TRANSCRIBE_DIR = Path(os.environ.get("GD_TRANSCRIBE_DIR",
-                                     r"D:\Agent\dnd-transcribe"))
+_transcribe_env = os.environ.get("GD_TRANSCRIBE_DIR", "").strip()
+TRANSCRIBE_DIR = Path(_transcribe_env) if _transcribe_env else None
 TRANSCRIBE_TIMEOUT = 3600
 _TRANSCRIBE_LOCK = asyncio.Lock()   # ASR грузит CPU — по одному звонку за раз
 _TRANSCRIBE_TASKS: set[asyncio.Task] = set()
+
+
+def _transcribe_python() -> Optional[Path]:
+    if TRANSCRIBE_DIR is None:
+        return None
+    for rel in ("Scripts/python.exe", "bin/python"):
+        py = TRANSCRIBE_DIR / "venv" / rel
+        if py.is_file():
+            return py
+    return None
 
 
 _TRANSCRIBE_ACTIVE: set[int] = set()
 
 
 def _spawn_transcribe(call_id: int, chat_id: int, root_id: int) -> None:
-    py = TRANSCRIBE_DIR / "venv" / "Scripts" / "python.exe"
-    if not py.is_file() or call_id in _TRANSCRIBE_ACTIVE:
+    if _transcribe_python() is None or call_id in _TRANSCRIBE_ACTIVE:
         return
     _TRANSCRIBE_ACTIVE.add(call_id)
     task = asyncio.create_task(_transcribe_call(call_id, chat_id, root_id))
@@ -1178,7 +1191,7 @@ def _spawn_transcribe(call_id: int, chat_id: int, root_id: int) -> None:
 async def _transcribe_call(call_id: int, chat_id: int, root_id: int) -> None:
     rec_dir = CALLS_DIR / str(call_id)
     out_json = rec_dir / "transcript.json"
-    py = TRANSCRIBE_DIR / "venv" / "Scripts" / "python.exe"
+    py = _transcribe_python()
     async with _TRANSCRIBE_LOCK:
         try:
             proc = await asyncio.create_subprocess_exec(
@@ -1393,8 +1406,7 @@ async def api_msg_transcribe(msg_id: int, request: Request):
                              " расшифровка уже была"}, status_code=409)
     if call_id in _TRANSCRIBE_ACTIVE:
         return JSONResponse({"error": "расшифровка уже идёт"}, status_code=409)
-    py = TRANSCRIBE_DIR / "venv" / "Scripts" / "python.exe"
-    if not py.is_file():
+    if _transcribe_python() is None:
         return JSONResponse({"error": "пайплайн расшифровки не настроен"
                              " (GD_TRANSCRIBE_DIR)"}, status_code=400)
     _spawn_transcribe(call_id, msg["chat_id"], msg_id)
@@ -1914,6 +1926,15 @@ async def api_vault_backlinks(request: Request, path: str):
     return vaultlib.backlinks(me(request), path)
 
 
+def _pandoc_hint() -> str:
+    import sys
+    if sys.platform == "win32":
+        return "winget install pandoc"
+    if sys.platform == "darwin":
+        return "brew install pandoc"
+    return "apt install pandoc"
+
+
 @app.get("/api/vault/export")
 async def api_vault_export(request: Request, path: str):
     """md -> docx через pandoc (если стоит в PATH, иначе 501 с подсказкой)."""
@@ -1931,7 +1952,7 @@ async def api_vault_export(request: Request, path: str):
     if not pandoc:
         return JSONResponse(
             {"error": "pandoc не установлен — экспорт в docx недоступен."
-                      " Поставьте: winget install pandoc — и перезапустите сервер."},
+                      f" Поставьте: {_pandoc_hint()} — и перезапустите сервер."},
             status_code=501)
     out_dir = HERE / "data" / "export"
     out_dir.mkdir(parents=True, exist_ok=True)

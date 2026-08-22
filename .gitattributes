@@ -1,0 +1,8 @@
+* text=auto
+
+# Скрипты запуска: CRLF ломает shebang на Linux/macOS.
+*.sh text eol=lf
+*.bat text eol=crlf
+
+# Вендоренные библиотеки не должны определять язык репозитория на GitHub.
+web/vendor/** linguist-vendored

@@ -1,4 +1,4 @@
--- Схема gd-assist. Правила те же, что в kanban: версия в meta, любая запись —
+-- Схема Foreman. Правила те же, что в kanban: версия в meta, любая запись —
 -- внутри store.write_tx() (BEGIN IMMEDIATE). Без STRICT: SQLite питона 3.10
 -- (3.34) его ещё не знает.
 
