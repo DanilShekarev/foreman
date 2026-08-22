@@ -128,7 +128,7 @@ FastAPI + SQLite (WAL) + vanilla JS. One uvicorn worker, no reload — agent
 sessions live in-process. Agent streaming is NDJSON over POST; other clients
 poll a change feed. The vault is a separate git repository; every write goes
 through a single lock. The only WebSocket is call signaling — media flows
-peer-to-peer. A deeper tour lives in [CLAUDE.md](CLAUDE.md) (written as
+peer-to-peer. A deeper tour lives in [AGENTS.md](AGENTS.md) (written as
 context for AI coding agents, works great for humans too).
 
 ## Contributing
