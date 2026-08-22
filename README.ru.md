@@ -9,7 +9,12 @@ git, канбан-доска, созвоны с расшифровкой — и 
 Всё живёт на вашем сервере. Одна SQLite-база, один git-репозиторий документов,
 фронтенд без сборки и без единого обращения к CDN.
 
-<!-- скриншоты: docs/img/chat.png, docs/img/vault.png, docs/img/kanban.png -->
+![Чат с агентом и открытый документ базы знаний](docs/img/vault.png)
+
+<p align="center">
+  <img src="docs/img/kanban.png" width="49%" alt="Канбан-доска">
+  <img src="docs/img/landing.png" width="49%" alt="Лендинг">
+</p>
 
 ## Что внутри
 

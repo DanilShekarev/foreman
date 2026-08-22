@@ -12,7 +12,12 @@ docs, a frontend with zero build steps and zero CDN calls.
 > ⚠️ The UI is currently Russian-only. English localization is the first big
 > item on the roadmap after the initial release.
 
-<!-- screenshots: docs/img/chat.png, docs/img/vault.png, docs/img/kanban.png -->
+![Chat with the agent and an open knowledge base document](docs/img/vault.png)
+
+<p align="center">
+  <img src="docs/img/kanban.png" width="49%" alt="Kanban board">
+  <img src="docs/img/landing.png" width="49%" alt="Landing page">
+</p>
 
 ## What's inside
 
