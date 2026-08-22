@@ -26,7 +26,7 @@ ENV_FILE = DEMO / "demo.env"
 if not ENV_FILE.is_file():
     ENV_FILE.write_text(f"GD_DB={DEMO / 'gd.sqlite'}" + NL +
                         f"GD_VAULT={DEMO / 'vault'}" + NL +
-                        "GD_PORT=8011" + NL, encoding="utf-8")
+                        "GD_PORT=8012" + NL, encoding="utf-8")
 # Собственный env-файл вместо .env установки: демо не должно ни видеть
 # боевые пути, ни зависеть от возможности выставить пустую переменную в cmd.
 os.environ["GD_ENV_FILE"] = str(ENV_FILE)
@@ -124,7 +124,7 @@ def main() -> int:
         print(f"  {py} server.py")
     else:
         print(f"  GD_ENV_FILE=" + chr(39) + str(ENV_FILE) + chr(39) + f" {py} server.py")
-    print("адрес: http://127.0.0.1:8011  вход: demo / demo1234")
+    print("адрес: http://127.0.0.1:8012  вход: demo / demo1234")
     return 0
 
 
