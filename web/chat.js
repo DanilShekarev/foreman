@@ -244,19 +244,40 @@ const CHAT = (() => {
 
   const modelSel = document.getElementById("model-select");
 
+  // Каталог приходит из api/me сгруппированным по провайдерам:
+  // [{key, title, models:[{value: "провайдер:модель", title}]}].
   function fillModelSel(){
     if (modelSel.options.length || !window.ME || !window.ME.models) return;
-    const cap = s => s.charAt(0).toUpperCase() + s.slice(1);
+    const groups = window.ME.models;
+    const titleOf = value => {
+      for (const g of groups)
+        for (const m of g.models)
+          if (m.value === value) return m.title;
+      return value || "";
+    };
     const def = document.createElement("option");
     def.value = "";
-    def.textContent = `Авто (${cap(window.ME.model_default || "")})`;
+    def.textContent = `Авто (${titleOf(window.ME.model_default)})`;
     modelSel.appendChild(def);
-    for (const m of window.ME.models){
-      const o = document.createElement("option");
-      o.value = m;
-      o.textContent = cap(m);
-      modelSel.appendChild(o);
+    const single = groups.length === 1;
+    for (const g of groups){
+      const box = single ? modelSel : document.createElement("optgroup");
+      if (!single) box.label = g.title;
+      for (const m of g.models){
+        const o = document.createElement("option");
+        o.value = m.value;
+        o.textContent = m.title;
+        box.appendChild(o);
+      }
+      if (!single) modelSel.appendChild(box);
     }
+  }
+
+  // Админ поправил провайдеров — пересобрать список, не перезагружая страницу.
+  function refreshModels(){
+    modelSel.innerHTML = "";
+    fillModelSel();
+    if (current) modelSel.value = current.model || "";
   }
 
   modelSel.onchange = async () => {
@@ -821,7 +842,9 @@ const CHAT = (() => {
     const b = document.createElement("span");
     b.className = "turn-model";
     b.title = "Модель этого хода: " + turn.model;
-    b.textContent = turn.model.replace(/^claude-/, "");
+    // Провайдеры отдают полные id ("anthropic/claude-sonnet-4-5",
+    // "z-ai/glm-5.2:free") — в бейдж лезет только суть.
+    b.textContent = turn.model.split("/").pop().replace(/^claude-/, "");
     const actions = head.querySelector(".msg-actions");
     if (actions) head.insertBefore(b, actions);
     else head.appendChild(b);
@@ -975,7 +998,8 @@ const CHAT = (() => {
           } else if (ev.type === "queued"){
             agentStateEl.textContent = `агент занят — сообщение в очереди (${ev.position})`;
           } else if (ev.type === "text" && agentBody){
-            agentText += (agentText ? "\n\n" : "") + ev.text;
+            // chunk — дельта своего цикла (клеим встык), иначе блок Claude.
+            agentText += (agentText && !ev.chunk ? "\n\n" : "") + ev.text;
             agentBody.innerHTML = MD.render(agentText);
             if (nearBottom(container)) container.scrollTop = container.scrollHeight;
           } else if (ev.type === "tool" && agentMain){
@@ -1445,7 +1469,7 @@ const CHAT = (() => {
   }
 
   return { open, onChanges, showTyping, updateReads, closeThread, jumpToMsg,
-           openThreadAt, avatarColor, initials,
+           openThreadAt, avatarColor, initials, refreshModels,
            // Зов снаружи (закрытие доски задач): чат снова виден — прочитан.
            markVisible: () => { if (lastMsgId && chatVisible()) markRead(); },
            currentId: () => current && current.id };

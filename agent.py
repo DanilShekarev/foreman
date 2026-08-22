@@ -1,19 +1,25 @@
 """Агент-сессии: по одной на чат, живут в процессе сервера.
 
 Паттерн из voxels/agent_runner.py, но сессий много (словарь chat_id -> Session).
-Каждая сессия — свой ClaudeSDKClient (подпроцесс CLI). Создаётся лениво при
-первом сообщении с resume сохранённого sdk_session_id, закрывается по
-idle-таймауту (session_id остаётся в БД — следующее сообщение делает resume).
+Ход считает один из двух движков — какой, решает провайдер выбранной моделью
+(llm.py):
 
-Права — ТОЛЬКО PreToolUse-хуками: запись в allowed_tools авторазрешает вызов
-до can_use_tool (CanUseToolShadowedWarning), поэтому колбэк-гард молча не
-работает. Bash запрещён целиком, git-операции делает сервер.
+* claude — ClaudeSDKClient, подпроцесс CLI. Создаётся лениво при первом
+  сообщении с resume сохранённого sdk_session_id, закрывается по
+  idle-таймауту (session_id остаётся в БД — следующее сообщение делает resume).
+  Права — ТОЛЬКО PreToolUse-хуками: запись в allowed_tools авторазрешает вызов
+  до can_use_tool (CanUseToolShadowedWarning), поэтому колбэк-гард молча не
+  работает. Bash запрещён целиком, git-операции делает сервер.
+* openai — свой цикл (agent_openai) поверх OpenAI-совместимого API; права там
+  проверяют сами инструменты (agent_tools.Access), хуков в этом пути нет.
+
+Всё, что после движка — сбор текста, список инструментов, git-коммит хода,
+события NDJSON — общее.
 """
 from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 import time
 from pathlib import Path
 from typing import Any, AsyncIterator, Optional
@@ -27,11 +33,12 @@ from claude_agent_sdk import (
     SystemMessage,
     TextBlock,
     ToolUseBlock,
-    create_sdk_mcp_server,
-    tool,
 )
 
+import agent_openai
+import agent_tools
 import gitops
+import llm
 import prompts
 import store
 import vaultlib
@@ -40,11 +47,6 @@ from vaultlib import VAULT
 
 import os
 
-MODEL = os.environ.get("GD_MODEL", "sonnet")
-# Модели, доступные к выбору per-чат (селектор в шапке чата).
-MODELS = tuple(m.strip() for m in
-               os.environ.get("GD_MODELS", "sonnet,opus,haiku").split(",")
-               if m.strip())
 MAX_TURNS = int(os.environ.get("GD_MAX_TURNS", "100"))
 IDLE_SECONDS = 30 * 60          # закрыть молчащий клиент (resume вернёт контекст)
 MAX_CONCURRENT_TURNS = 3        # глобальный предел одновременных ходов
@@ -69,16 +71,6 @@ SAFE_TOOLS = frozenset(WRITE_TOOLS) | set(FS_TOOLS) | set(KANBAN_TOOLS) | set(
     THREAD_TOOLS) | {"Read", "Grep", "Glob", "TodoWrite"}
 
 
-def _ru_plural(n: int, one: str, few: str, many: str) -> str:
-    """1 сообщение / 2 сообщения / 5 сообщений."""
-    n10, n100 = n % 10, n % 100
-    if n10 == 1 and n100 != 11:
-        return one
-    if 2 <= n10 <= 4 and not (12 <= n100 <= 14):
-        return few
-    return many
-
-
 def _deny(message: str) -> dict:
     return {"hookSpecificOutput": {"hookEventName": "PreToolUse",
                                    "permissionDecision": "deny",
@@ -96,521 +88,11 @@ async def whitelist_guard(input_data, tool_use_id, context):
     return {}
 
 
-def _make_fs_server(scopes: dict, extra_read: set):
-    """Байтовые файловые операции: Write пишет только текст, который агент сам
-    формирует, поэтому картинку или docx он без этих тулзов не перенесёт.
-    Права те же, что у гардов: читать — read-корни + extra_read, писать —
-    write-корни; .git закрыт."""
-    read_roots = [p.resolve() for p in scopes["read"]]
-    write_roots = [p.resolve() for p in scopes["write"]]
-
-    def _resolve(raw: str) -> Path:
-        p = Path(raw)
-        if not p.is_absolute():
-            p = VAULT / "shared" / p
-        return p.resolve()
-
-    def _ok(text: str) -> dict:
-        return {"content": [{"type": "text", "text": text}]}
-
-    def _err(text: str) -> dict:
-        return {"content": [{"type": "text", "text": text}], "is_error": True}
-
-    def _readable(p: Path) -> bool:
-        return (".git" not in p.parts
-                and (vaultlib.path_under(p, read_roots) or p in extra_read))
-
-    def _writable(p: Path) -> bool:
-        return ".git" not in p.parts and vaultlib.path_under(p, write_roots)
-
-    @tool("copy_file", "Скопировать файл байт-в-байт (картинки, docx и другие "
-          "нетекстовые файлы). src — любой доступный тебе для чтения файл, "
-          "dst — путь внутри твоих областей записи.",
-          {"src": str, "dst": str})
-    async def copy_file(args):
-        src, dst = _resolve(args["src"]), _resolve(args["dst"])
-        if not _readable(src):
-            return _err(f"src вне доступных тебе областей: {src}")
-        if not src.is_file():
-            return _err(f"src не существует: {src}")
-        if not _writable(dst):
-            return _err(f"dst вне твоих областей записи: {dst}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(src, dst)
-        return _ok(f"скопировано: {src} -> {dst}")
-
-    @tool("move_file", "Переместить или переименовать файл или папку внутри "
-          "твоих областей записи.", {"src": str, "dst": str})
-    async def move_file(args):
-        src, dst = _resolve(args["src"]), _resolve(args["dst"])
-        if not _writable(src):
-            return _err(f"src вне твоих областей записи: {src}")
-        if not src.exists():
-            return _err(f"src не существует: {src}")
-        if src in write_roots:
-            return _err(f"корневую папку области записи двигать нельзя: {src}")
-        if not _writable(dst):
-            return _err(f"dst вне твоих областей записи: {dst}")
-        if src.is_dir() and (dst == src or src in dst.parents):
-            return _err(f"нельзя переместить папку внутрь самой себя: {dst}")
-        dst.parent.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(src), str(dst))
-        return _ok(f"перемещено: {src} -> {dst}")
-
-    @tool("delete_file", "Удалить файл в твоих областях записи "
-          "(git сохраняет историю, удаление откатываемо).", {"path": str})
-    async def delete_file(args):
-        p = _resolve(args["path"])
-        if not _writable(p):
-            return _err(f"путь вне твоих областей записи: {p}")
-        if not p.is_file():
-            return _err(f"не файл или не существует: {p}")
-        p.unlink()
-        return _ok(f"удалено: {p}")
-
-    @tool("delete_dir", "Удалить папку со всем содержимым в твоих областях "
-          "записи (git сохраняет историю файлов, удаление откатываемо).",
-          {"path": str})
-    async def delete_dir(args):
-        p = _resolve(args["path"])
-        if not _writable(p):
-            return _err(f"путь вне твоих областей записи: {p}")
-        if p in write_roots:
-            return _err(f"корневую папку области записи удалять нельзя: {p}")
-        if not p.is_dir():
-            return _err(f"не папка или не существует: {p}")
-        shutil.rmtree(p)
-        return _ok(f"папка удалена: {p}")
-
-    return create_sdk_mcp_server(name="fs", version="1.0.0",
-                                 tools=[copy_file, move_file, delete_file,
-                                        delete_dir])
-
-
-def _make_kanban_server():
-    """Доска задач команды: агент видит и ведёт её наравне с людьми.
-    Одна общая доска, права не нужны — её видят все пользователи."""
-
-    def _ok(text: str) -> dict:
-        return {"content": [{"type": "text", "text": text}]}
-
-    def _err(text: str) -> dict:
-        return {"content": [{"type": "text", "text": text}], "is_error": True}
-
-    def _logins_to_ids(conn, raw: str) -> list[int]:
-        """'ivan, petya' -> [id, id]. Пустая строка — пустой список."""
-        ids = []
-        for login in [s.strip().lstrip("@") for s in (raw or "").split(",")]:
-            if not login:
-                continue
-            u = store.user_by_login(conn, login)
-            if u is None:
-                known = ", ".join(x["login"] for x in store.list_users(conn)
-                                  if not x["disabled_at"])
-                raise store.StoreError(
-                    f"нет пользователя «{login}» (есть: {known})")
-            ids.append(u["id"])
-        return ids
-
-    def _labels_to_ids(conn, raw: str) -> list[int]:
-        """'баг, UI' -> [id, id]; несуществующие метки создаются с автоцветом."""
-        ids = []
-        existing = {l["name"].lower(): l for l in store.kanban_labels_list(conn)}
-        for name in [s.strip() for s in (raw or "").split(",")]:
-            if not name:
-                continue
-            lab = existing.get(name.lower())
-            if lab is None:
-                lab = store.kanban_label_create(conn, name)
-                existing[lab["name"].lower()] = lab
-            ids.append(lab["id"])
-        return ids
-
-    def _fmt_card(c: dict) -> str:
-        who = ", ".join(a["login"] for a in c["assignees"]) or "никто"
-        line = f"  #{c['id']} {c['title']} — исполнители: {who}"
-        extra = []
-        if c.get("priority") and c["priority"] != "normal":
-            extra.append(f"приоритет {c['priority']}")
-        if c.get("due_date"):
-            extra.append(f"срок {c['due_date']}")
-        if c.get("labels"):
-            extra.append("метки: " + ", ".join(l["name"] for l in c["labels"]))
-        if c.get("checklist_total"):
-            extra.append(f"чеклист {c['checklist_done']}/{c['checklist_total']}")
-        if c.get("comments_count"):
-            extra.append(f"комментариев {c['comments_count']}")
-        if extra:
-            line += " · " + ", ".join(extra)
-        body = " ".join((c.get("body") or "").split())
-        if body:
-            line += f"\n      {body[:200]}{'…' if len(body) > 200 else ''}"
-        return line
-
-    @tool("list_cards", "Показать доску задач команды: все карточки по "
-          "колонкам (backlog=Планы, todo=К работе, doing=В работе, "
-          "done=Готово) с id, заголовком, описанием и исполнителями.", {})
-    async def list_cards(args):
-        conn = store.connect()
-        try:
-            data = store.kanban_list(conn)
-        finally:
-            conn.close()
-        by_col: dict[str, list[str]] = {}
-        for c in data["cards"]:
-            by_col.setdefault(c["column_key"], []).append(_fmt_card(c))
-        out = []
-        for col in data["columns"]:
-            lines = by_col.get(col["key"], [])
-            out.append(f"{col['title']} ({col['key']}) — {len(lines)}:")
-            out.extend(lines or ["  (пусто)"])
-        return _ok("\n".join(out))
-
-    @tool("create_card", "Завести задачу на доске. column: backlog|todo|"
-          "doing|done (по умолчанию todo — передай пустую строку). "
-          "assignees — логины исполнителей через запятую (можно пусто).",
-          {"title": str, "body": str, "column": str, "assignees": str})
-    async def create_card(args):
-        conn = store.connect()
-        try:
-            ids = _logins_to_ids(conn, args.get("assignees") or "")
-            card = store.kanban_create(
-                conn, args.get("title") or "",
-                body=args.get("body") or "",
-                column=(args.get("column") or "").strip() or "todo",
-                actor_name=store.AGENT_NAME, assignee_ids=ids)
-        except store.StoreError as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        return _ok(f"создана карточка #{card['id']} в колонке "
-                   f"{card['column_key']}")
-
-    @tool("move_card", "Перенести карточку в другую колонку: "
-          "backlog|todo|doing|done.", {"card_id": str, "column": str})
-    async def move_card(args):
-        conn = store.connect()
-        try:
-            card = store.kanban_update(
-                conn, int(args.get("card_id") or 0),
-                column=(args.get("column") or "").strip(),
-                actor_name=store.AGENT_NAME)
-        except (store.StoreError, ValueError) as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        return _ok(f"карточка #{card['id']} теперь в {card['column_key']}")
-
-    @tool("update_card", "Изменить карточку: заголовок, описание, "
-          "исполнителей (логины через запятую; «-» — снять всех), "
-          "priority (low|normal|high|urgent), due (ГГГГ-ММ-ДД; «-» — снять "
-          "срок), labels (имена меток через запятую, новые создаются сами; "
-          "«-» — снять все). Пустая строка в поле — не менять его.",
-          {"card_id": str, "title": str, "body": str, "assignees": str,
-           "priority": str, "due": str, "labels": str})
-    async def update_card(args):
-        conn = store.connect()
-        try:
-            kwargs = {"actor_name": store.AGENT_NAME}
-            if (args.get("title") or "").strip():
-                kwargs["title"] = args["title"]
-            if (args.get("body") or "").strip():
-                kwargs["body"] = args["body"]
-            raw = (args.get("assignees") or "").strip()
-            if raw == "-":
-                kwargs["assignee_ids"] = []
-            elif raw:
-                kwargs["assignee_ids"] = _logins_to_ids(conn, raw)
-            if (args.get("priority") or "").strip():
-                kwargs["priority"] = args["priority"].strip()
-            due = (args.get("due") or "").strip()
-            if due == "-":
-                kwargs["due_date"] = None
-            elif due:
-                kwargs["due_date"] = due
-            labs = (args.get("labels") or "").strip()
-            if labs == "-":
-                kwargs["label_ids"] = []
-            elif labs:
-                kwargs["label_ids"] = _labels_to_ids(conn, labs)
-            if len(kwargs) == 1:
-                return _err("нечего менять: все поля пустые")
-            card = store.kanban_update(conn, int(args.get("card_id") or 0),
-                                       **kwargs)
-        except (store.StoreError, ValueError) as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        who = ", ".join(a["login"] for a in card["assignees"]) or "никто"
-        return _ok(f"карточка #{card['id']} обновлена (исполнители: {who})")
-
-    _KIND_RU = {"create": "создание", "move": "перенос", "title": "заголовок",
-                "body": "описание", "assignees": "исполнители",
-                "labels": "метки", "priority": "приоритет", "due": "срок",
-                "checklist": "чеклист", "archive": "в архив",
-                "restore": "из архива"}
-
-    @tool("get_card", "Полная карточка по id: описание целиком, приоритет, "
-          "срок, метки, чеклист, комментарии и последние изменения. "
-          "Смотри карточку перед тем, как её менять.", {"card_id": str})
-    async def get_card(args):
-        conn = store.connect()
-        try:
-            card = store.kanban_card_full(conn, int(args.get("card_id") or 0))
-        except (store.StoreError, ValueError) as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        cols = dict(store.KANBAN_COLUMNS)
-        out = [f"#{card['id']} {card['title']}",
-               f"колонка: {cols.get(card['column_key'], card['column_key'])}"
-               f" · приоритет: {card['priority']}"
-               + (f" · срок: {card['due_date']}" if card["due_date"] else "")]
-        if card["labels"]:
-            out.append("метки: " + ", ".join(l["name"] for l in card["labels"]))
-        who = ", ".join(a["login"] for a in card["assignees"]) or "никто"
-        out.append(f"исполнители: {who}")
-        out.append(f"создал(а): {card['creator_name'] or 'агент'}"
-                   f" · {card['created_at'][:16]}")
-        if card["body"]:
-            out.append("\n" + card["body"])
-        if card["checklist"]:
-            out.append("\nЧеклист:")
-            for n, it in enumerate(card["checklist"], start=1):
-                out.append(f"  {n}. [{'x' if it['done'] else ' '}] {it['text']}")
-        if card["comments"]:
-            out.append("\nКомментарии:")
-            for c in card["comments"][-10:]:
-                out.append(f"  {c['author_name'] or 'агент'}"
-                           f" ({c['created_at'][:16]}): {c['text']}")
-        if card["activity"]:
-            out.append("\nПоследние изменения:")
-            for a in card["activity"][:10]:
-                what = _KIND_RU.get(a["kind"], a["kind"])
-                d = a["data"]
-                detail = (f" {d['from']} -> {d['to']}"
-                          if "from" in d or "to" in d else "")
-                out.append(f"  {a['actor_name'] or 'агент'}"
-                           f" ({a['created_at'][:16]}): {what}{detail}")
-        return _ok("\n".join(out))
-
-    @tool("comment_card", "Оставить комментарий к карточке — отмечай ход "
-          "работы и находки.", {"card_id": str, "text": str})
-    async def comment_card(args):
-        conn = store.connect()
-        try:
-            c = store.kanban_comment_add(
-                conn, int(args.get("card_id") or 0), args.get("text") or "",
-                author_name=store.AGENT_NAME)
-        except (store.StoreError, ValueError) as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        return _ok(f"комментарий к #{c['card_id']} добавлен")
-
-    @tool("checklist_add", "Добавить пункты чеклиста к карточке "
-          "(по одному на строку).", {"card_id": str, "items": str})
-    async def checklist_add(args):
-        lines = [s.strip() for s in (args.get("items") or "").splitlines()
-                 if s.strip()]
-        if not lines:
-            return _err("пустой список пунктов")
-        conn = store.connect()
-        try:
-            cid = int(args.get("card_id") or 0)
-            for line in lines:
-                store.kanban_check_add(conn, cid, line,
-                                       actor_name=store.AGENT_NAME)
-        except (store.StoreError, ValueError) as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        return _ok(f"добавлено пунктов: {len(lines)}")
-
-    @tool("checklist_set", "Отметить пункт чеклиста: item — номер (1, 2, …) "
-          "или кусок текста пункта; done — yes|no.",
-          {"card_id": str, "item": str, "done": str})
-    async def checklist_set(args):
-        conn = store.connect()
-        try:
-            card = store.kanban_card_full(conn, int(args.get("card_id") or 0))
-            items = card["checklist"]
-            key = (args.get("item") or "").strip()
-            found = None
-            if key.isdigit() and 1 <= int(key) <= len(items):
-                found = items[int(key) - 1]
-            else:
-                hits = [it for it in items
-                        if key.lower() in it["text"].lower()] if key else []
-                if len(hits) == 1:
-                    found = hits[0]
-                elif len(hits) > 1:
-                    return _err("несколько пунктов подходят: "
-                                + "; ".join(h["text"] for h in hits))
-            if found is None:
-                return _err("пункт не найден; чеклист: "
-                            + "; ".join(f"{n}. {it['text']}"
-                                        for n, it in enumerate(items, 1)))
-            done = (args.get("done") or "yes").strip().lower() not in (
-                "no", "false", "0", "нет")
-            store.kanban_check_set(conn, found["id"], done=done)
-        except (store.StoreError, ValueError) as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        return _ok(f"пункт «{found['text']}» -> {'сделан' if done else 'снят'}")
-
-    return create_sdk_mcp_server(name="kanban", version="1.0.0",
-                                 tools=[list_cards, create_card, move_card,
-                                        update_card, get_card, comment_card,
-                                        checklist_add, checklist_set])
-
-
-def _make_threads_server(chat_id: int):
-    """Наведение порядка в чате: агент раскидывает сообщения ленты по тредам
-    (плоская модель — messages.thread_root_id, один уровень, как в Slack).
-    Права не нужны — это тот же чат, где уже идёт разговор с агентом."""
-
-    def _ok(text: str) -> dict:
-        return {"content": [{"type": "text", "text": text}]}
-
-    def _err(text: str) -> dict:
-        return {"content": [{"type": "text", "text": text}], "is_error": True}
-
-    def _parse_ids(raw: str) -> list[int]:
-        ids = []
-        for tok in (raw or "").split(","):
-            # id сообщений подписаны как m123 (см. prompts.channel_context);
-            # решётку и «m» принимаем и срезаем — агенту проще.
-            tok = tok.strip().lstrip("#m")
-            if not tok:
-                continue
-            if not tok.isdigit():
-                raise store.StoreError(f"не похоже на id сообщения: «{tok}»")
-            ids.append(int(tok))
-        return ids
-
-    @tool("list_recent", "Последние сообщения ЛЕНТЫ этого чата (сообщения "
-          "внутри тредов сюда не попадают) — id, автор, время и начало "
-          "текста, чтобы решить, что и куда раскидать по тредам. count — "
-          "сколько сообщений строкой, по умолчанию 50, максимум 200.",
-          {"count": str})
-    async def list_recent(args):
-        raw = (args.get("count") or "").strip()
-        try:
-            n = int(raw) if raw else 50
-        except ValueError:
-            return _err(f"count должен быть числом, получил «{raw}»")
-        n = max(1, min(200, n))
-        conn = store.connect()
-        try:
-            msgs = store.list_messages(conn, chat_id, limit=n)
-        finally:
-            conn.close()
-        if not msgs:
-            return _ok("сообщений в ленте пока нет")
-        lines = []
-        for m in msgs:
-            if m.get("deleted_at"):
-                text = "(удалено)"
-            else:
-                text = " ".join((m.get("text") or "").split()) or "(без текста)"
-                if len(text) > 120:
-                    text = text[:120] + "…"
-            hhmm = (m.get("created_at") or "")[11:16]
-            # m123, не #123: решётка в чате зарезервирована под ссылки на
-            # задачи канбана.
-            lines.append(f"[m{m['id']}] {m['author_name']} ({hhmm}): {text}")
-        return _ok("\n".join(lines))
-
-    @tool("read_thread", "Прочитать тред целиком: корень и все ответы, "
-          "полными текстами. Годится для длинных тредов и расшифровок "
-          "созвонов (тред под системным «Звонок завершён»). "
-          "root_message_id — id корневого сообщения ленты (в ленте и "
-          "list_recent это m123; можно передать id любого ответа — корень "
-          "найдётся сам).", {"root_message_id": str})
-    async def read_thread(args):
-        raw_root = (args.get("root_message_id") or "").strip().lstrip("#m")
-        if not raw_root.isdigit():
-            return _err(f"root_message_id должен быть числом,"
-                        f" получил «{raw_root}»")
-        conn = store.connect()
-        try:
-            root = store.get_message(conn, int(raw_root))
-            if root["chat_id"] != chat_id:
-                return _err("это сообщение из другого чата")
-            if root.get("thread_root_id"):
-                root = store.get_message(conn, root["thread_root_id"])
-            msgs = store.list_messages(conn, chat_id, limit=2000,
-                                       thread_root_id=root["id"])
-        except store.StoreError as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        lines = [f"[m{root['id']}] (корень) {root['author_name']}:"
-                 f" {root.get('text') or '(без текста)'}"]
-        for m in msgs:
-            text = ("(удалено)" if m.get("deleted_at")
-                    else (m.get("text") or "(без текста)"))
-            lines.append(f"[m{m['id']}] {m['author_name']}: {text}")
-        out = "\n".join(lines)
-        # Страховка от простыней: транспорт SDK — 1 МБ на строку JSON.
-        if len(out) > 400_000:
-            out = out[:400_000] + "\n[…тред обрезан, показано начало]"
-        if not msgs:
-            out += "\n(ответов в треде нет)"
-        return _ok(out)
-
-    @tool("move_to_thread", "Перенести сообщения ленты этого чата в тред "
-          "указанного корневого сообщения (сообщение остаётся видно в "
-          "ленте как корень, остальные уходят в его тред). "
-          "root_message_id — id сообщения-корня (само сообщение ленты, не "
-          "находящееся в другом треде). message_ids — id переносимых "
-          "сообщений через запятую, например «12, 13, 14» (id смотри в "
-          "list_recent). Переноси сообщения ТОЛЬКО по явной просьбе "
-          "пользователя.", {"root_message_id": str, "message_ids": str})
-    async def move_to_thread(args):
-        conn = store.connect()
-        try:
-            raw_root = (args.get("root_message_id") or "").strip().lstrip("#m")
-            if not raw_root.isdigit():
-                return _err(f"root_message_id должен быть числом,"
-                            f" получил «{raw_root}»")
-            root_id = int(raw_root)
-            ids = _parse_ids(args.get("message_ids") or "")
-            if not ids:
-                return _err("не указаны message_ids")
-            root = store.messages_to_thread(conn, chat_id, root_id, ids)
-            n = len(ids)
-            store.add_message(
-                conn, chat_id, author_kind="system", author_user_id=None,
-                author_name="система",
-                text=f"агент перенёс {n} "
-                     f"{_ru_plural(n, 'сообщение', 'сообщения', 'сообщений')}"
-                     f" в тред")
-        except store.StoreError as err:
-            return _err(str(err))
-        finally:
-            conn.close()
-        return _ok(f"перенесено в тред #{root['id']}: {n}"
-                   f" {_ru_plural(n, 'сообщение', 'сообщения', 'сообщений')}")
-
-    return create_sdk_mcp_server(name="threads", version="1.0.0",
-                                 tools=[list_recent, read_thread,
-                                        move_to_thread])
-
-
-def _make_guards(scopes: dict, extra_read: set):
-    """write_guard: только write-корни сессии; read_guard: только read-корни
-    (shared + свой personal + Unity). Пути с .git режутся всегда.
-    extra_read — живой set точечных разрешений (приложенные к сообщениям файлы
-    из data/uploads); каталог uploads целиком остаётся закрыт — Glob по нему
-    показал бы файлы чужих чатов."""
-    read_roots = [p.resolve() for p in scopes["read"]]
-    write_roots = [p.resolve() for p in scopes["write"]]
-
-    def _bad_git(p: Path) -> bool:
-        return ".git" in p.parts
+def _make_guards(access: agent_tools.Access):
+    """Гарды CLI: те же права, что у инструментов своего цикла — write-корни
+    сессии на запись, read-корни (shared + свой personal + Unity) и точечные
+    разрешения на приложенные файлы на чтение. Каталог uploads целиком
+    остаётся закрыт: Glob по нему показал бы файлы чужих чатов."""
 
     async def write_guard(input_data, tool_use_id, context):
         name = input_data.get("tool_name") or ""
@@ -619,14 +101,11 @@ def _make_guards(scopes: dict, extra_read: set):
         raw = _tool_path(input_data.get("tool_input") or {})
         if not raw:
             return _deny("не указан путь файла")
-        p = Path(raw)
-        if not p.is_absolute():
-            p = VAULT / "shared" / p
-        p = p.resolve()
-        if _bad_git(p):
+        p = access.resolve(raw)
+        if ".git" in p.parts:
             return _deny(".git трогать нельзя")
-        if not vaultlib.path_under(p, write_roots):
-            allowed = ", ".join(str(r) for r in write_roots)
+        if not access.writable(p):
+            allowed = ", ".join(str(r) for r in access.write_roots)
             return _deny(f"писать можно только в: {allowed}. Код игры — только чтение.")
         return {}
 
@@ -637,13 +116,10 @@ def _make_guards(scopes: dict, extra_read: set):
         raw = _tool_path(input_data.get("tool_input") or {})
         if not raw:
             return {}  # без пути инструмент работает от cwd (vault/shared)
-        p = Path(raw)
-        if not p.is_absolute():
-            p = VAULT / "shared" / p
-        p = p.resolve()
-        if _bad_git(p):
+        p = access.resolve(raw)
+        if ".git" in p.parts:
             return _deny(".git читать незачем")
-        if not vaultlib.path_under(p, read_roots) and p not in extra_read:
+        if not access.readable(p):
             return _deny("этот путь вне твоих областей: доступны волт (shared"
                          " и твоя personal-папка), код игры (только чтение)"
                          " и файлы, приложенные к сообщениям этого чата.")
@@ -679,23 +155,32 @@ class AgentSession:
         self.worker: Optional[asyncio.Task] = None
         self.last_used = time.monotonic()
         self.busy = False
+        # Прерывание своего цикла: у CLI для этого есть client.interrupt().
+        self.cancel = asyncio.Event()
         # Точечные read-разрешения на приложенные файлы; set мутируется в
         # submit(), замыкание гарда видит пополнения без переподключения.
         self.extra_read: set[Path] = set()
 
+    def access(self) -> agent_tools.Access:
+        return agent_tools.Access(
+            vaultlib.agent_scopes(self.chat_kind, self.owner_login),
+            self.extra_read)
+
+    def prompt_for(self, title: str) -> str:
+        # Модель не знает своего имени сама (его нет ни в весах, ни в среде) —
+        # сообщаем, иначе на «кто ты» она отвечает наугад.
+        return (self.system_prompt + f"\n\nТехническая справка: ты работаешь"
+                                     f" на модели «{title}».")
+
     def _options(self, resume: Optional[str],
                  model: str) -> ClaudeAgentOptions:
-        scopes = vaultlib.agent_scopes(self.chat_kind, self.owner_login)
-        write_guard, read_guard = _make_guards(scopes, self.extra_read)
+        access = self.access()
+        write_guard, read_guard = _make_guards(access)
         add_dirs = [str(vaultlib.unity_root())]  # зеркало main, не рабочая копия
         if self.chat_kind == "agent" and self.owner_login:
             add_dirs.append(str(VAULT / "personal" / self.owner_login))
         return ClaudeAgentOptions(
-            # Модель не знает своего имени сама (его нет ни в весах, ни в
-            # среде) — сообщаем, иначе на «кто ты» она отвечает наугад.
-            system_prompt=(self.system_prompt +
-                           f"\n\nТехническая справка: ты работаешь на модели"
-                           f" Claude «{model}»."),
+            system_prompt=self.prompt_for(f"Claude {model}"),
             model=model,
             cwd=str(VAULT / "shared"),
             add_dirs=add_dirs,
@@ -705,9 +190,7 @@ class AgentSession:
                               "NotebookEdit", "ToolSearch", "SlashCommand"],
             permission_mode="acceptEdits",
             setting_sources=[],
-            mcp_servers={"fs": _make_fs_server(scopes, self.extra_read),
-                         "kanban": _make_kanban_server(),
-                         "threads": _make_threads_server(self.chat_id)},
+            mcp_servers=agent_tools.mcp_servers(access, self.chat_id),
             hooks={"PreToolUse": [
                 # matcher=None — на все инструменты; deny любого хука побеждает
                 HookMatcher(matcher=None, hooks=[whitelist_guard]),
@@ -793,17 +276,21 @@ class SessionManager:
 
     async def interrupt(self, chat_id: int) -> bool:
         s = self.sessions.get(chat_id)
-        if s and s.client and s.busy:
+        if not (s and s.busy):
+            return False
+        if s.client is not None:
             try:
                 await s.client.interrupt()
                 return True
             except Exception:
                 return False
-        return False
+        # Свой цикл смотрит флаг между чанками ответа и вызовами инструментов.
+        s.cancel.set()
+        return True
 
     def status(self, chat_id: int) -> dict:
         s = self.sessions.get(chat_id)
-        return {"active": s is not None and s.client is not None,
+        return {"active": s is not None,
                 "busy": bool(s and s.busy),
                 "queued": s.queue.qsize() if s else 0}
 
@@ -858,14 +345,14 @@ class SessionManager:
                     s.busy = False
                     s.last_used = time.monotonic()
 
-    async def _run_turn(self, s: AgentSession, job: TurnJob) -> None:
+    async def _claude_stream(self, s: AgentSession, job: TurnJob,
+                             model: str) -> AsyncIterator[dict]:
+        """Ход на CLI: сообщения SDK переводятся в общие события движка."""
         conn = store.connect()
         try:
             resume = store.stored_sdk_session(conn, s.chat_id)
-            model = store.get_chat(conn, s.chat_id).get("model") or MODEL
         finally:
             conn.close()
-
         # Модель чата сменили — переподключаемся; resume вернёт контекст.
         if s.client is not None and s.model_in_use != model:
             await s.disconnect()
@@ -879,85 +366,138 @@ class SessionManager:
                 # одна попытка без resume.
                 await s.connect(None, model)
 
-        text_parts: list[str] = []
+        await s.client.query(job.prompt)
+        async for msg in s.client.receive_response():
+            if isinstance(msg, AssistantMessage):
+                for block in msg.content:
+                    if isinstance(block, TextBlock) and block.text.strip():
+                        yield {"type": "text", "text": block.text}
+                    elif isinstance(block, ToolUseBlock):
+                        yield {"type": "tool", "name": block.name,
+                               "input": block.input or {}}
+            elif isinstance(msg, SystemMessage):
+                if msg.subtype == "init" and msg.data.get("model"):
+                    yield {"type": "init", "model": msg.data["model"]}
+            elif isinstance(msg, ResultMessage):
+                cost = getattr(msg, "total_cost_usd", None)
+                yield {"type": "result",
+                       "session_id": getattr(msg, "session_id", None),
+                       "cost_usd": float(cost) if cost else None}
+
+    async def _engine_stream(self, s: AgentSession, job: TurnJob,
+                             picked: dict) -> AsyncIterator[dict]:
+        if picked["kind"] == "claude":
+            async for ev in self._claude_stream(s, job, picked["model_id"]):
+                yield ev
+            return
+        # Подписочный CLI и чужой провайдер в одной сессии не уживаются:
+        # клиент держит свою модель и свой контекст.
+        await s.disconnect()
+        provider = picked["provider"]
+        title = f"{picked['title']} (провайдер {provider['title']})"
+        async for ev in agent_openai.run(
+                chat_id=s.chat_id, system_prompt=s.prompt_for(title),
+                prompt=job.prompt, access=s.access(), provider=provider,
+                api_key=llm.api_key(provider), model_id=picked["model_id"],
+                vision=picked["vision"], max_steps=MAX_TURNS,
+                cancel=s.cancel, turn_id=job.turn_id):
+            # Текст своего цикла идёт дельтами: склеивать их абзацным
+            # отступом, как блоки Claude, нельзя — порвёт слова.
+            yield {**ev, "chunk": True} if ev.get("type") == "text" else ev
+
+    async def _run_turn(self, s: AgentSession, job: TurnJob) -> None:
+        conn = store.connect()
+        try:
+            chat = store.get_chat(conn, s.chat_id)
+            picked = llm.resolve_for_chat(conn, chat.get("model"))
+        finally:
+            conn.close()
+        if picked is None:
+            await self._fail_turn(
+                s, job, "не настроено ни одной модели — админ заводит"
+                        " провайдеров в настройках")
+            return
+        s.cancel.clear()
+
+        text = ""
         tools: list[dict] = []
         touched: list[Path] = []
         sdk_session_id: Optional[str] = None
         cost_usd: Optional[float] = None
-        real_model: Optional[str] = None  # из init-сообщения SDK, ground truth
+        real_model: Optional[str] = None  # что ответил провайдер, ground truth
         last_db_push = 0.0
 
-        async def push_db(status: str = "streaming") -> None:
+        async def push_db() -> None:
             conn = store.connect()
             try:
-                store.update_message_text(conn, job.agent_msg_id,
-                                          "\n\n".join(text_parts), status)
+                store.update_message_text(conn, job.agent_msg_id, text,
+                                          "streaming")
             finally:
                 conn.close()
 
         await job.emit("start", turn=job.turn_id, message_id=job.agent_msg_id)
         try:
-            await s.client.query(job.prompt)
-            async for msg in s.client.receive_response():
-                if isinstance(msg, AssistantMessage):
-                    for block in msg.content:
-                        if isinstance(block, TextBlock) and block.text.strip():
-                            text_parts.append(block.text)
-                            await job.emit("text", text=block.text)
-                            if time.monotonic() - last_db_push > DB_THROTTLE:
-                                last_db_push = time.monotonic()
-                                await push_db()
-                        elif isinstance(block, ToolUseBlock):
-                            entry = {"name": block.name,
-                                     "input": _short_input(block.input)}
-                            tools.append(entry)
-                            await job.emit("tool", **entry)
-                            # В БД сразу: перезагруженная посреди хода
-                            # страница и наблюдатели видят 🔧 живьём.
-                            conn = store.connect()
-                            try:
-                                store.update_turn_tools(
-                                    conn, job.turn_id, tools,
-                                    job.agent_msg_id)
-                            finally:
-                                conn.close()
-                            keys: tuple[str, ...] = ()
-                            if block.name in WRITE_TOOLS:
-                                keys = ("file_path", "path")
-                            elif block.name.endswith("copy_file"):
-                                keys = ("dst",)
-                            elif block.name.endswith("move_file"):
-                                keys = ("src", "dst")   # src — удаление
-                            elif block.name.endswith(("delete_file",
-                                                      "delete_dir")):
-                                keys = ("path",)
-                            for key in keys:
-                                raw = (block.input or {}).get(key)
-                                if not raw:
-                                    continue
-                                p = Path(raw)
-                                if not p.is_absolute():
-                                    p = VAULT / "shared" / p
-                                touched.append(p)
-                                if block.name in WRITE_TOOLS:
-                                    break  # file_path ИЛИ path — один файл
-                elif isinstance(msg, SystemMessage):
-                    if msg.subtype == "init" and msg.data.get("model"):
-                        real_model = msg.data["model"]
-                        print(f"[agent] чат {s.chat_id}: ход {job.turn_id}"
-                              f" на модели {real_model}")
-                elif isinstance(msg, ResultMessage):
-                    sdk_session_id = getattr(msg, "session_id", None)
-                    cost = getattr(msg, "total_cost_usd", None)
-                    if cost:
-                        cost_usd = float(cost)
+            async for ev in self._engine_stream(s, job, picked):
+                kind = ev.get("type")
+                if kind == "text":
+                    piece, chunk = ev["text"], bool(ev.get("chunk"))
+                    text += ("" if chunk or not text else "\n\n") + piece
+                    await job.emit("text", text=piece, chunk=chunk)
+                    if time.monotonic() - last_db_push > DB_THROTTLE:
+                        last_db_push = time.monotonic()
+                        await push_db()
+                elif kind == "tool":
+                    data = ev.get("input") or {}
+                    entry = {"name": ev["name"], "input": _short_input(data)}
+                    tools.append(entry)
+                    await job.emit("tool", **entry)
+                    # В БД сразу: перезагруженная посреди хода страница и
+                    # наблюдатели видят 🔧 живьём.
+                    conn = store.connect()
+                    try:
+                        store.update_turn_tools(conn, job.turn_id, tools,
+                                                job.agent_msg_id)
+                    finally:
+                        conn.close()
+                    touched.extend(_touched_paths(ev["name"], data))
+                elif kind == "init":
+                    real_model = ev.get("model")
+                    print(f"[agent] чат {s.chat_id}: ход {job.turn_id}"
+                          f" на модели {real_model}")
+                elif kind == "result":
+                    sdk_session_id = ev.get("session_id") or sdk_session_id
+                    real_model = real_model or ev.get("model")
+                    if ev.get("cost_usd"):
+                        cost_usd = float(ev["cost_usd"])
+        except asyncio.CancelledError:
+            if not s.cancel.is_set():
+                raise  # это гасят сессию, а не жмут «стоп»
+            await self._settle(s, job, status="interrupted", text=text,
+                               tools=tools, touched=touched,
+                               real_model=real_model,
+                               note="\n\n_(остановлено)_")
+            return
+        except agent_openai.LoopError as err:
+            await self._fail_turn(s, job, str(err), text=text)
+            return
         except Exception as err:
             await self._fail_turn(s, job, f"{type(err).__name__}: {err}",
-                                  text="\n\n".join(text_parts),
-                                  sdk_session_id=sdk_session_id)
+                                  text=text, sdk_session_id=sdk_session_id)
             return
 
-        # git-коммит хода — только тронутые файлы
+        await self._settle(s, job, status="done", text=text, tools=tools,
+                           touched=touched, sdk_session_id=sdk_session_id,
+                           cost_usd=cost_usd, real_model=real_model)
+
+    async def _settle(self, s: AgentSession, job: TurnJob, *, status: str,
+                      text: str, tools: list[dict], touched: list[Path],
+                      sdk_session_id: Optional[str] = None,
+                      cost_usd: Optional[float] = None,
+                      real_model: Optional[str] = None,
+                      note: str = "") -> None:
+        """Закрыть ход: коммит тронутых файлов, запись в БД, события клиенту.
+        Прерванный ход закрывается так же — правки уже на диске, и без
+        коммита их нечем было бы откатить."""
         commit_hash = None
         files_rel: list[str] = []
         if touched:
@@ -975,13 +515,14 @@ class SessionManager:
 
         conn = store.connect()
         try:
-            store.finish_turn(conn, job.turn_id, status="done",
+            store.finish_turn(conn, job.turn_id, status=status,
                               sdk_session_id=sdk_session_id, cost_usd=cost_usd,
                               files=files_rel, tools=tools,
                               commit_hash=commit_hash, model=real_model)
+            store.update_message_text(conn, job.agent_msg_id,
+                                      (text + note).strip(), "final")
         finally:
             conn.close()
-        await push_db(status="final")
         await job.emit("turn", turn=job.turn_id, files=files_rel,
                        commit=commit_hash, cost_usd=cost_usd)
         await job.emit("done")
@@ -1003,6 +544,32 @@ class SessionManager:
         await job.close()
         # Клиент после ошибки надёжнее пересоздать (resume восстановит контекст).
         await s.disconnect()
+
+
+def _touched_paths(name: str, data: dict) -> list[Path]:
+    """Файлы, которые ход мог изменить: их и коммитим. Имена приходят и от
+    CLI (mcp__fs__copy_file), и от своего цикла (copy_file) — сверяем хвост."""
+    keys: tuple[str, ...] = ()
+    if name in WRITE_TOOLS:
+        keys = ("file_path", "path")
+    elif name.endswith("copy_file"):
+        keys = ("dst",)
+    elif name.endswith("move_file"):
+        keys = ("src", "dst")   # src — удаление
+    elif name.endswith(("delete_file", "delete_dir")):
+        keys = ("path",)
+    out: list[Path] = []
+    for key in keys:
+        raw = data.get(key)
+        if not raw:
+            continue
+        p = Path(raw)
+        if not p.is_absolute():
+            p = VAULT / "shared" / p
+        out.append(p)
+        if name in WRITE_TOOLS:
+            break  # file_path ИЛИ path — один файл
+    return out
 
 
 def _short_input(data: Any, limit: int = 300) -> str:

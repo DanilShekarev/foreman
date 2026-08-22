@@ -378,8 +378,8 @@ def create_agent_chat(conn: sqlite3.Connection, user: dict) -> dict:
 
 def set_chat_model(conn: sqlite3.Connection, chat_id: int,
                    model: Optional[str]) -> None:
-    """Модель агента для чата; None/'' — вернуться к дефолту сервера.
-    Валидность значения проверяет ручка (список живёт в agent.MODELS)."""
+    """Модель агента для чата в виде «провайдер:модель»; None/'' — вернуться
+    к дефолту сервера. Валидность проверяет ручка (реестр — в llm.py)."""
     with write_tx(conn):
         conn.execute("UPDATE chats SET model = ? WHERE id = ?",
                      (model or None, chat_id))
@@ -431,6 +431,7 @@ def delete_agent_chat(conn: sqlite3.Connection, chat_id: int,
                      " AND thread_root_id IS NOT NULL", (chat_id,))
         conn.execute("DELETE FROM messages WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM agent_sessions WHERE chat_id = ?", (chat_id,))
+        conn.execute("DELETE FROM agent_history WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM chat_reads WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM chat_members WHERE chat_id = ?", (chat_id,))
         conn.execute("DELETE FROM uploads WHERE chat_id = ?", (chat_id,))
@@ -998,6 +999,166 @@ def stored_sdk_session(conn: sqlite3.Connection, chat_id: int) -> Optional[str]:
     row = conn.execute("SELECT sdk_session_id FROM agent_sessions WHERE chat_id = ?",
                        (chat_id,)).fetchone()
     return row["sdk_session_id"] if row else None
+
+
+# --------------------------------------------- провайдеры LLM и их история
+
+_LLM_KEY_RE = re.compile(r"[a-z0-9_-]{2,32}")
+LLM_KINDS = ("claude", "openai")
+
+
+def _llm_dict(row: sqlite3.Row) -> dict:
+    p = dict(row)
+    try:
+        p["models"] = json.loads(p.pop("models_json") or "[]")
+    except json.JSONDecodeError:
+        p["models"] = []
+    p["enabled"] = bool(p["enabled"])
+    return p
+
+
+def _llm_models_json(models: Any) -> str:
+    """Список моделей провайдера: строка «id» или {id, title, vision}."""
+    out = []
+    for m in models or []:
+        if isinstance(m, str):
+            m = {"id": m}
+        mid = (m.get("id") or "").strip()
+        if not mid:
+            continue
+        out.append({"id": mid,
+                    "title": (m.get("title") or "").strip() or mid,
+                    "vision": bool(m.get("vision"))})
+    return json.dumps(out, ensure_ascii=False)
+
+
+def llm_providers(conn: sqlite3.Connection) -> list[dict]:
+    return [_llm_dict(r) for r in conn.execute(
+        "SELECT * FROM llm_providers ORDER BY sort, id")]
+
+
+def llm_provider(conn: sqlite3.Connection, provider_id: int) -> dict:
+    row = conn.execute("SELECT * FROM llm_providers WHERE id = ?",
+                       (provider_id,)).fetchone()
+    if row is None:
+        raise NotFound("провайдер не найден")
+    return _llm_dict(row)
+
+
+def llm_provider_by_key(conn: sqlite3.Connection, key: str) -> Optional[dict]:
+    row = conn.execute("SELECT * FROM llm_providers WHERE key = ?",
+                       ((key or "").strip().lower(),)).fetchone()
+    return _llm_dict(row) if row else None
+
+
+def llm_provider_create(conn: sqlite3.Connection, *, key: str, title: str,
+                        kind: str, base_url: Optional[str] = None,
+                        api_key: Optional[str] = None, models: Any = None,
+                        enabled: bool = True) -> dict:
+    key = (key or "").strip().lower()
+    if not _LLM_KEY_RE.fullmatch(key):
+        raise StoreError("ключ провайдера: 2–32 символа, латиница/цифры/_-")
+    if kind not in LLM_KINDS:
+        raise StoreError(f"вид провайдера: {' или '.join(LLM_KINDS)}")
+    base_url = (base_url or "").strip() or None
+    if kind == "openai" and not base_url:
+        raise StoreError("для OpenAI-совместимого провайдера нужен адрес API")
+    with write_tx(conn):
+        sort = conn.execute("SELECT COALESCE(MAX(sort), 0) + 1 AS n"
+                            " FROM llm_providers").fetchone()["n"]
+        try:
+            cur = conn.execute(
+                f"INSERT INTO llm_providers(key, title, kind, base_url, api_key,"
+                f" models_json, enabled, sort, created_at)"
+                f" VALUES (?,?,?,?,?,?,?,?,{NOW_SQL})",
+                (key, (title or "").strip() or key, kind, base_url,
+                 (api_key or "").strip() or None, _llm_models_json(models),
+                 int(bool(enabled)), sort))
+        except sqlite3.IntegrityError:
+            raise StoreError(f"провайдер «{key}» уже заведён")
+    return llm_provider(conn, cur.lastrowid)
+
+
+def llm_provider_update(conn: sqlite3.Connection, provider_id: int, *,
+                        title: Optional[str] = None,
+                        base_url: Optional[str] = None,
+                        api_key: Optional[str] = None,
+                        models: Any = None,
+                        enabled: Optional[bool] = None,
+                        sort: Optional[int] = None) -> dict:
+    """Ключ и вид провайдера не меняются: на key завязаны значения chats.model."""
+    p = llm_provider(conn, provider_id)
+    sets, args = [], []
+    if title is not None and title.strip():
+        sets.append("title = ?"); args.append(title.strip())
+    if base_url is not None:
+        url = base_url.strip() or None
+        if p["kind"] == "openai" and not url:
+            raise StoreError("для OpenAI-совместимого провайдера нужен адрес API")
+        sets.append("base_url = ?"); args.append(url)
+    if api_key is not None:
+        # «-» стирает ключ, пустая строка означает «не трогать» (ручка так и шлёт).
+        sets.append("api_key = ?")
+        args.append(None if api_key.strip() == "-" else api_key.strip())
+    if models is not None:
+        sets.append("models_json = ?"); args.append(_llm_models_json(models))
+    if enabled is not None:
+        sets.append("enabled = ?"); args.append(int(bool(enabled)))
+    if sort is not None:
+        sets.append("sort = ?"); args.append(int(sort))
+    if not sets:
+        return p
+    with write_tx(conn):
+        conn.execute(f"UPDATE llm_providers SET {', '.join(sets)} WHERE id = ?",
+                     (*args, provider_id))
+    return llm_provider(conn, provider_id)
+
+
+def llm_provider_delete(conn: sqlite3.Connection, provider_id: int) -> None:
+    llm_provider(conn, provider_id)
+    with write_tx(conn):
+        conn.execute("DELETE FROM llm_providers WHERE id = ?", (provider_id,))
+
+
+def history_append(conn: sqlite3.Connection, chat_id: int,
+                   turn_id: Optional[int], messages: list) -> None:
+    """Сообщения одного хода своего цикла (user + ответы модели + результаты
+    инструментов) — одной строкой, чтобы обрезка не разрывала пары."""
+    if not messages:
+        return
+    with write_tx(conn):
+        conn.execute(
+            f"INSERT INTO agent_history(chat_id, turn_id, messages_json,"
+            f" created_at) VALUES (?,?,?,{NOW_SQL})",
+            (chat_id, turn_id, json.dumps(messages, ensure_ascii=False)))
+
+
+def history_recent(conn: sqlite3.Connection, chat_id: int,
+                   budget_chars: int) -> list[dict]:
+    """Последние ходы, пока влезают в бюджет символов. Самый свежий ход
+    возвращается всегда, даже если один переполняет бюджет."""
+    blocks: list[list[dict]] = []
+    total = 0
+    for row in conn.execute(
+            "SELECT messages_json FROM agent_history WHERE chat_id = ?"
+            " ORDER BY id DESC LIMIT 100", (chat_id,)):
+        raw = row["messages_json"]
+        if blocks and total + len(raw) > budget_chars:
+            break
+        try:
+            blocks.append(json.loads(raw))
+        except json.JSONDecodeError:
+            continue
+        total += len(raw)
+    out: list[dict] = []
+    for block in reversed(blocks):
+        out.extend(block)
+    return out
+
+
+def history_clear(conn: sqlite3.Connection, chat_id: int) -> None:
+    with write_tx(conn):
+        conn.execute("DELETE FROM agent_history WHERE chat_id = ?", (chat_id,))
 
 
 # --------------------------------------------------------------- changefeed

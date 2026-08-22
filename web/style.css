@@ -605,6 +605,20 @@ option{background:var(--bg1);color:var(--fg)}
 #modal .userpick div:hover{background:var(--bg3)}
 #modal hr{border:none;border-top:1px solid var(--border);margin:16px 0}
 
+/* форма провайдера LLM (админка → Модели агента) */
+#modal .field{display:block;margin-bottom:10px}
+#modal .field span{display:block;margin-bottom:4px;font-size:12px;
+  color:var(--fg-dim)}
+#modal .field textarea{width:100%;padding:8px 12px;resize:vertical;
+  font:12px/1.5 Cascadia Code,Consolas,monospace}
+#modal .field select{width:100%;padding:8px 12px}
+#modal .check{display:flex;align-items:center;gap:8px;margin:10px 0}
+#modal .check input{width:auto;margin:0}
+#modal .hint{font-size:12px;color:var(--fg-dim);min-height:17px}
+#modal .hint.warn,#modal .warn{color:var(--yellow)}
+#modal .row button.danger{color:var(--red)}
+#modal .row button.danger:hover{background:var(--red-soft)}
+
 /* ============================================================ CodeMirror */
 /* min-height:0 обязателен: без него CM раскрывается на всю длину документа
    и растягивает панель вместо внутреннего скролла. */

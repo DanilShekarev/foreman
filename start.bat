@@ -24,6 +24,10 @@ rem set GD_TURN_USER=foreman
 rem set GD_TURN_PASS=пароль-из-turnserver.conf
 rem STUN по умолчанию stun.l.google.com:19302, свой — через GD_STUN_URL.
 
+rem Модели агента настраиваются в UI: админ -> Модели агента. Ключ провайдера
+rem можно не хранить в базе - в поле ключа написать env:ИМЯ_ПЕРЕМЕННОЙ,
+rem например env:OPENROUTER_API_KEY.
+
 rem Расшифровка созвонов: ASR-пайплайн dnd-transcribe (venv+модель GigaAM).
 rem Нет каталога — расшифровка тихо выключена, звонки работают как обычно.
 if "%GD_TRANSCRIBE_DIR%"=="" set GD_TRANSCRIBE_DIR=D:\Agent\dnd-transcribe

@@ -565,7 +565,10 @@ const APP = (() => {
       человек сам выбирает логин и пароль, после регистрации ссылка гаснет.
       Неиспользованная — истекает через 7 дней.</p>
       <div id="inv-list">${invites.map(inviteRow).join("") || "<i>приглашений нет</i>"}</div>
-      <div class="row"><button id="m-cancel">Закрыть</button><button id="m-invite">${ICON("plus")} Ссылка-приглашение</button></div>`);
+      <div class="row"><button id="m-cancel">Закрыть</button>
+        <button id="m-llm">${ICON("spark")} Модели агента</button>
+        <button id="m-invite">${ICON("plus")} Ссылка-приглашение</button></div>`);
+    modal.querySelector("#m-llm").onclick = openLlm;
     modal.querySelector("#m-cancel").onclick = closeModal;
     modal.querySelectorAll(".admin-user[data-id]").forEach(row => {
       const id = row.dataset.id;
@@ -609,6 +612,153 @@ const APP = (() => {
       if (data.error){ showAlert(data.error); return; }
       openAdmin();
     };
+  }
+
+  // ------------------------------------------------------------- модели агента
+
+  const KIND_TITLE = {claude: "Claude (подписка)", openai: "OpenAI-совместимый"};
+
+  async function openLlm(){
+    const data = await (await fetch("api/admin/llm")).json();
+    if (data.error){ showAlert(data.error); return; }
+    const providers = data.providers || [];
+    const row = p => {
+      const models = p.models.length
+        ? p.models.map(m => MD.esc(m.title || m.id)).join(", ")
+        : "моделей нет";
+      const key = p.has_key ? "" : ` · <span class="warn">без ключа</span>`;
+      return `<div class="admin-user${p.enabled ? "" : " off"}" data-id="${p.id}">
+        <span class="who">${MD.esc(p.title)}
+          <small>${KIND_TITLE[p.kind] || p.kind} · ${models}${key}</small></span>
+        <button class="b-edit" title="Настроить">${ICON("pencil")}</button>
+        <button class="b-off" title="${p.enabled ? "Выключить" : "Включить"}">${p.enabled ? ICON("pause") : ICON("play")}</button>
+      </div>`;
+    };
+    openModal(`
+      <h3>Модели агента</h3>
+      <p style="font-size:12px;color:var(--fg-dim);margin:0 0 8px">Провайдер —
+      это способ добраться до модели. Claude работает по подписке, остальные —
+      по ключу к OpenAI-совместимому API (OpenRouter, локальный сервер).
+      Выключенные провайдеры не показываются в выборе модели чата.</p>
+      <div id="llm-list">${providers.map(row).join("") || "<i>провайдеров нет</i>"}</div>
+      <div class="row"><button id="m-cancel">Закрыть</button>
+        <button id="m-add">${ICON("plus")} Провайдер</button></div>`);
+    modal.querySelector("#m-cancel").onclick = closeModal;
+    modal.querySelector("#m-add").onclick = () => openLlmForm(null);
+    modal.querySelectorAll(".admin-user[data-id]").forEach(el => {
+      const p = providers.find(x => String(x.id) === el.dataset.id);
+      el.querySelector(".b-edit").onclick = () => openLlmForm(p);
+      el.querySelector(".b-off").onclick = async () => {
+        await patchLlm(p.id, {enabled: !p.enabled});
+        openLlm();
+      };
+    });
+  }
+
+  async function patchLlm(id, body){
+    const r = await fetch(`api/admin/llm/${id}`, {
+      method: "PATCH", headers: {"Content-Type": "application/json"},
+      body: JSON.stringify(body),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (data.error){ showAlert(data.error); return null; }
+    await reloadModels();
+    return data;
+  }
+
+  // Каталог моделей уехал — обновляем селектор в шапке чата на месте.
+  async function reloadModels(){
+    const r = await fetch("api/me");
+    if (r.ok){
+      window.ME = await r.json();
+      if (window.CHAT && CHAT.refreshModels) CHAT.refreshModels();
+    }
+  }
+
+  function openLlmForm(p){
+    const isNew = !p;
+    const modelLines = (p ? p.models : [])
+      .map(m => [m.id, m.title || "", m.vision ? "vision" : ""]
+        .filter(Boolean).join(" | ")).join("\n");
+    const keyHint = p && p.key_env
+      ? `сейчас из переменной окружения ${MD.esc(p.key_env)}`
+      : (p && p.has_key ? "ключ задан" : "ключа нет");
+    openModal(`
+      <h3>${isNew ? "Новый провайдер" : MD.esc(p.title)}</h3>
+      <label class="field"><span>Название</span>
+        <input id="f-title" type="text" value="${p ? MD.esc(p.title) : ""}"
+               placeholder="OpenRouter"></label>
+      ${isNew ? `
+      <label class="field"><span>Ключ (латиницей, попадёт в id модели)</span>
+        <input id="f-key" type="text" placeholder="openrouter"></label>
+      <label class="field"><span>Вид</span>
+        <select id="f-kind">
+          <option value="openai">OpenAI-совместимый</option>
+          <option value="claude">Claude (подписка)</option>
+        </select></label>` : ""}
+      <label class="field"><span>Адрес API</span>
+        <input id="f-url" type="text" value="${p ? MD.esc(p.base_url) : ""}"
+               placeholder="https://openrouter.ai/api/v1"></label>
+      <label class="field"><span>Ключ API — ${keyHint}</span>
+        <input id="f-apikey" type="text" autocomplete="off"
+               placeholder="env:OPENROUTER_API_KEY или сам ключ; пусто — не менять, «-» — стереть"></label>
+      <label class="field"><span>Модели, по одной в строке: id | название | vision</span>
+        <textarea id="f-models" rows="5"
+                  placeholder="z-ai/glm-5.2:free | GLM 5.2 (free)">${MD.esc(modelLines)}</textarea></label>
+      <label class="check"><input id="f-enabled" type="checkbox"
+        ${!p || p.enabled ? "checked" : ""}><span>Показывать в выборе модели</span></label>
+      <div id="f-note" class="hint"></div>
+      <div class="row">
+        <button id="m-back">Назад</button>
+        ${isNew ? "" : `<button id="m-del" class="danger">${ICON("trash")} Удалить</button>`}
+        ${isNew ? "" : `<button id="m-check">Проверить связь</button>`}
+        <button id="m-save" class="btn-primary">Сохранить</button>
+      </div>`);
+    const note = modal.querySelector("#f-note");
+    modal.querySelector("#m-back").onclick = openLlm;
+    modal.querySelector("#m-save").onclick = async () => {
+      const body = {
+        title: modal.querySelector("#f-title").value.trim(),
+        base_url: modal.querySelector("#f-url").value.trim(),
+        api_key: modal.querySelector("#f-apikey").value.trim(),
+        models: modal.querySelector("#f-models").value,
+        enabled: modal.querySelector("#f-enabled").checked,
+      };
+      let data;
+      if (isNew){
+        body.key = modal.querySelector("#f-key").value.trim();
+        body.kind = modal.querySelector("#f-kind").value;
+        const r = await fetch("api/admin/llm", {
+          method: "POST", headers: {"Content-Type": "application/json"},
+          body: JSON.stringify(body),
+        });
+        data = await r.json().catch(() => ({}));
+        if (data.error){ showAlert(data.error); return; }
+        await reloadModels();
+      } else {
+        data = await patchLlm(p.id, body);
+        if (!data) return;
+      }
+      openLlm();
+    };
+    if (!isNew){
+      modal.querySelector("#m-del").onclick = async () => {
+        if (!confirm(`Удалить провайдера «${p.title}»? Чаты, где выбраны его`
+                     + ` модели, вернутся к модели по умолчанию.`)) return;
+        const r = await fetch(`api/admin/llm/${p.id}`, {method: "DELETE"});
+        const d = await r.json().catch(() => ({}));
+        if (d.error){ showAlert(d.error); return; }
+        await reloadModels();
+        openLlm();
+      };
+      modal.querySelector("#m-check").onclick = async () => {
+        note.textContent = "проверяю…";
+        const r = await fetch(`api/admin/llm/${p.id}/check`, {method: "POST"});
+        const d = await r.json().catch(() => ({}));
+        note.textContent = d.text || d.error || "нет ответа";
+        note.className = "hint" + (d.ok ? "" : " warn");
+      };
+    }
   }
 
   // ------------------------------------------------------------- волт-панель

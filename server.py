@@ -17,6 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 import common  # noqa: F401  (utf-8 консоль, QuickEdit) — импорт с побочным эффектом
+import httpx2 as httpx
 import uvicorn
 from dataclasses import dataclass, field
 from fastapi import FastAPI, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -29,7 +30,9 @@ import gitops
 import prompts
 import store
 import vaultlib
-from agent import MODEL, MODELS, manager
+import agent_openai
+import llm
+from agent import manager
 from vaultlib import VAULT
 
 HERE = Path(__file__).resolve().parent
@@ -53,6 +56,7 @@ async def lifespan(app: FastAPI):
             store.create_user(conn, "admin", password, "Админ", is_admin=True)
             print(f"[init] создан пользователь admin, пароль: {password}")
             print("[init] смените его после первого входа (или задайте GD_ADMIN_PASSWORD)")
+        llm.seed(conn)
         vaultlib.ensure_layout([u["login"] for u in store.list_users(conn)])
         # Встроенный общий канал.
         row = conn.execute("SELECT id FROM chats WHERE kind='channel' AND title='Общий'").fetchone()
@@ -326,9 +330,151 @@ def _err(exc: Exception, code: int = 400) -> JSONResponse:
 @app.get("/api/me")
 async def api_me(request: Request):
     u = me(request)
+    conn = store.connect()
+    try:
+        models, default = llm.catalog(conn), llm.default_choice(conn)
+    finally:
+        conn.close()
     return {"id": u["id"], "login": u["login"], "display_name": u["display_name"],
             "is_admin": bool(u["is_admin"]),
-            "models": list(MODELS), "model_default": MODEL}
+            "models": models, "model_default": default}
+
+
+def _provider_out(p: dict) -> dict:
+    """Наружу — всё, кроме самого ключа: только признак, что он задан, и
+    имя переменной окружения, если ключ берётся оттуда."""
+    raw = (p.get("api_key") or "").strip()
+    return {"id": p["id"], "key": p["key"], "title": p["title"],
+            "kind": p["kind"], "base_url": p["base_url"] or "",
+            "models": p["models"], "enabled": p["enabled"],
+            "key_env": raw[4:] if raw.startswith("env:") else "",
+            "has_key": bool(llm.api_key(p))}
+
+
+@app.get("/api/admin/llm")
+async def admin_llm_list(request: Request):
+    if not me(request)["is_admin"]:
+        return JSONResponse({"error": "только для админа"}, status_code=403)
+    conn = store.connect()
+    try:
+        return {"providers": [_provider_out(p) for p in store.llm_providers(conn)]}
+    finally:
+        conn.close()
+
+
+def _models_from_body(body: dict):
+    """Модели приходят из формы построчно: «id | Название | vision»."""
+    raw = body.get("models")
+    if raw is None:
+        return None
+    if isinstance(raw, list):
+        return raw
+    out = []
+    for line in str(raw).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = [x.strip() for x in line.split("|")]
+        out.append({"id": parts[0],
+                    "title": parts[1] if len(parts) > 1 else "",
+                    "vision": len(parts) > 2 and parts[2].lower() in
+                              ("vision", "картинки", "1", "true", "да")})
+    return out
+
+
+@app.post("/api/admin/llm")
+async def admin_llm_create(request: Request):
+    if not me(request)["is_admin"]:
+        return JSONResponse({"error": "только для админа"}, status_code=403)
+    body = await request.json()
+    conn = store.connect()
+    try:
+        p = store.llm_provider_create(
+            conn, key=body.get("key") or "", title=body.get("title") or "",
+            kind=(body.get("kind") or "openai").strip(),
+            base_url=body.get("base_url"), api_key=body.get("api_key"),
+            models=_models_from_body(body) or [],
+            enabled=bool(body.get("enabled", True)))
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    return _provider_out(p)
+
+
+@app.patch("/api/admin/llm/{provider_id}")
+async def admin_llm_update(provider_id: int, request: Request):
+    if not me(request)["is_admin"]:
+        return JSONResponse({"error": "только для админа"}, status_code=403)
+    body = await request.json()
+    # Пустая строка в поле ключа означает «не трогать»: формы шлют его всегда,
+    # а показать текущий ключ мы не можем. Стереть — прислать «-».
+    api_key = body.get("api_key")
+    conn = store.connect()
+    try:
+        p = store.llm_provider_update(
+            conn, provider_id, title=body.get("title"),
+            base_url=body.get("base_url"),
+            api_key=api_key if (api_key or "").strip() else None,
+            models=_models_from_body(body),
+            enabled=body.get("enabled"), sort=body.get("sort"))
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    return _provider_out(p)
+
+
+@app.delete("/api/admin/llm/{provider_id}")
+async def admin_llm_delete(provider_id: int, request: Request):
+    if not me(request)["is_admin"]:
+        return JSONResponse({"error": "только для админа"}, status_code=403)
+    conn = store.connect()
+    try:
+        store.llm_provider_delete(conn, provider_id)
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
+@app.post("/api/admin/llm/{provider_id}/check")
+async def admin_llm_check(provider_id: int, request: Request):
+    """Проверка связи: спрашиваем у провайдера список моделей его же ключом.
+    Отвечает — значит адрес и ключ рабочие."""
+    if not me(request)["is_admin"]:
+        return JSONResponse({"error": "только для админа"}, status_code=403)
+    conn = store.connect()
+    try:
+        p = store.llm_provider(conn, provider_id)
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+    if p["kind"] == "claude":
+        return {"ok": True, "text": common.setup_auth()}
+    key = llm.api_key(p)
+    if not key:
+        return {"ok": False, "text": "ключ API не задан"}
+    try:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            resp = await client.get(agent_openai.endpoint(p, "/models"),
+                                    headers=agent_openai.headers(p, key))
+    except Exception as exc:
+        return {"ok": False, "text": f"{type(exc).__name__}: {exc}"}
+    if resp.status_code >= 400:
+        return {"ok": False, "text": f"провайдер ответил {resp.status_code}:"
+                                     f" {resp.text[:200]}"}
+    try:
+        known = {m.get("id") for m in (resp.json().get("data") or [])}
+    except ValueError:
+        return {"ok": False, "text": "провайдер ответил не JSON"}
+    missing = [m["id"] for m in p["models"] if known and m["id"] not in known]
+    text = f"связь есть, моделей у провайдера: {len(known)}"
+    if missing:
+        text += "; провайдер не знает: " + ", ".join(missing)
+    return {"ok": not missing, "text": text}
 
 
 @app.get("/api/users")
@@ -449,13 +595,13 @@ async def api_chat_model(chat_id: int, request: Request):
     переподключается с resume, контекст не теряется."""
     body = await request.json()
     model = (body.get("model") or "").strip()
-    if model and model not in MODELS:
-        return JSONResponse(
-            {"error": f"нет модели «{model}» (есть: {', '.join(MODELS)})"},
-            status_code=400)
     conn = store.connect()
     try:
         store.require_chat(conn, chat_id, me(request))
+        if model and llm.resolve(conn, model) is None:
+            return JSONResponse(
+                {"error": f"модель «{model}» недоступна — обновите страницу"},
+                status_code=400)
         store.set_chat_model(conn, chat_id, model)
     except store.StoreError as exc:
         return _err(exc)

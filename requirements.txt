@@ -4,3 +4,4 @@ claude-agent-sdk
 python-multipart
 mammoth
 markdownify
+httpx2

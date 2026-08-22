@@ -230,3 +230,32 @@ CREATE TABLE IF NOT EXISTS calls (
     started_at TEXT NOT NULL,
     ended_at   TEXT     -- NULL = не финализирован (добивается при старте сервера)
 );
+
+-- Провайдеры LLM (#49): kind='claude' — подписочный CLI через Agent SDK,
+-- kind='openai' — любой OpenAI-совместимый эндпоинт (OpenRouter, локальный).
+-- key — префикс в chats.model («openrouter:z-ai/glm-5.2:free»).
+CREATE TABLE IF NOT EXISTS llm_providers (
+    id          INTEGER PRIMARY KEY,
+    key         TEXT NOT NULL UNIQUE,
+    title       TEXT NOT NULL,
+    kind        TEXT NOT NULL CHECK (kind IN ('claude','openai')),
+    base_url    TEXT,
+    api_key     TEXT,   -- «env:ИМЯ» читается из окружения; наружу не отдаётся
+    models_json TEXT NOT NULL DEFAULT '[]',  -- [{id, title, vision}]
+    enabled     INTEGER NOT NULL DEFAULT 1,
+    sort        INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+
+-- Контекст своего агентного цикла: у Claude-движка историю держит CLI (resume
+-- по sdk_session_id), у OpenAI-движка ей жить больше негде. Строка = один ход
+-- целиком, поэтому обрезка по бюджету не рвёт пары tool_call/tool.
+CREATE TABLE IF NOT EXISTS agent_history (
+    id            INTEGER PRIMARY KEY,
+    chat_id       INTEGER NOT NULL REFERENCES chats(id),
+    turn_id       INTEGER,
+    messages_json TEXT NOT NULL,
+    created_at    TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_history_chat ON agent_history(chat_id, id);
