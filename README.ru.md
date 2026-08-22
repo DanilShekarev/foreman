@@ -1,6 +1,6 @@
 # Foreman
 
-**[English](README.md) | Русский**
+**[English](README.md) | Русский** · [Сайт](https://danilshekarev.github.io/foreman/)
 
 Self-hosted рабочее пространство для небольшой команды: чаты, база знаний под
 git, канбан-доска, созвоны с расшифровкой — и ИИ-агент, который ведёт ваши

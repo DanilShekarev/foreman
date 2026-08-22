@@ -1,6 +1,6 @@
 # Foreman
 
-**English | [Русский](README.ru.md)**
+**English | [Русский](README.ru.md)** · [Website](https://danilshekarev.github.io/foreman/)
 
 Self-hosted workspace for small teams: chat, a git-backed knowledge base, a
 kanban board, voice calls with transcripts — and an AI agent that maintains
