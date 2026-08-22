@@ -138,4 +138,6 @@ in [THIRD-PARTY.md](THIRD-PARTY.md).
 
 ## License
 
-[MIT](LICENSE)
+[AGPL-3.0](LICENSE). In short: use and self-host freely; if you
+modify Foreman and offer it to others over a network, you must publish
+your modified source under the same license.
