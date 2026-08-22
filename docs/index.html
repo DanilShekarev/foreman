@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Foreman — чаты, база знаний и ИИ-агент для команды</title>
+<meta name="description" content="Self-hosted платформа: чаты команды, markdown-база знаний под git, канбан, созвоны и ИИ-агент, читающий код проекта.">
+<style>
+:root{
+  --bg0:#0e0f11; --bg1:#131416; --bg2:#18191c; --bg3:#1e2024;
+  --border:#26282c; --border-strong:#34373d;
+  --fg:#f0f1f3; --fg-dim:#8f949d; --fg-faint:#62666d;
+  --accent:#5e6ad2; --accent-hover:#6e79e0;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg0);color:var(--fg);
+  font:16px/1.65 "Segoe UI",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent-hover);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:920px;margin:0 auto;padding:0 24px}
+header{position:sticky;top:0;background:rgba(14,15,17,.92);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);z-index:10}
+header .wrap{display:flex;align-items:center;gap:28px;height:56px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;color:var(--fg)}
+.brand:hover{text-decoration:none}
+nav{margin-left:auto;display:flex;gap:22px}
+nav a{color:var(--fg-dim);font-size:14px}
+nav a:hover{color:var(--fg);text-decoration:none}
+nav a.gh{color:var(--fg)}
+section{padding:64px 0;border-bottom:1px solid var(--border)}
+h1{font-size:40px;line-height:1.2;letter-spacing:-.02em;margin:0 0 16px}
+h2{font-size:24px;letter-spacing:-.01em;margin:0 0 8px}
+h3{font-size:16px;margin:0 0 6px}
+.sub{color:var(--fg-dim);margin:0 0 28px;max-width:640px}
+.lead{font-size:19px;color:var(--fg-dim);max-width:640px;margin:0 0 28px}
+.btns{display:flex;gap:12px;flex-wrap:wrap}
+.btn{display:inline-block;padding:10px 20px;border-radius:8px;font-size:15px;
+  border:1px solid var(--border-strong);color:var(--fg)}
+.btn:hover{background:var(--bg3);text-decoration:none}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.primary:hover{background:var(--accent-hover)}
+.shot{width:100%;border:1px solid var(--border-strong);border-radius:10px;
+  margin-top:40px;display:block}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:28px}
+.card{background:var(--bg1);border:1px solid var(--border);border-radius:10px;padding:20px 22px}
+.card p{margin:0;color:var(--fg-dim);font-size:14.5px}
+table{border-collapse:collapse;width:100%;margin-top:20px;font-size:15px}
+th,td{border:1px solid var(--border-strong);padding:10px 14px;text-align:left;vertical-align:top}
+th{background:var(--bg2);font-weight:600}
+td{color:var(--fg-dim)}
+td b,td code{color:var(--fg)}
+code{background:var(--bg2);border:1px solid var(--border);border-radius:5px;
+  padding:1px 6px;font:13.5px/1.6 Consolas,Menlo,monospace}
+pre{background:var(--bg1);border:1px solid var(--border-strong);border-radius:10px;
+  padding:16px 18px;overflow-x:auto;margin:20px 0 0}
+pre code{background:none;border:none;padding:0;color:var(--fg)}
+pre .c{color:var(--fg-faint)}
+ul.feat{margin:16px 0 0;padding-left:20px;color:var(--fg-dim)}
+ul.feat li{margin:6px 0}
+ul.feat b{color:var(--fg)}
+.note{background:var(--bg1);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:8px;padding:14px 18px;color:var(--fg-dim);font-size:14.5px;margin-top:24px}
+footer{padding:36px 0 48px;color:var(--fg-faint);font-size:14px}
+footer .wrap{display:flex;gap:20px;flex-wrap:wrap}
+footer a{color:var(--fg-dim)}
+@media (max-width:720px){
+  .grid{grid-template-columns:1fr}
+  h1{font-size:30px}
+  nav{display:none}
+}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <a class="brand" href="#">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="#f59d3d" d="M4.6 14v-1.2c0-4.6 3.3-8.3 7.4-8.3s7.4 3.7 7.4 8.3V14z"/><rect x="10.55" y="5.2" width="2.9" height="8.2" rx="1.2" fill="#fbd06e"/><rect x="6.9" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="15.1" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="4.2" y="14" width="15.6" height="1.7" fill="#ee7f2f"/><rect x="1.8" y="15.7" width="20.4" height="2.9" rx="1.45" fill="#f59d3d"/></svg>
+    Foreman
+  </a>
+  <nav>
+    <a href="#features">Возможности</a>
+    <a href="#agent">Агент</a>
+    <a href="#security">Безопасность</a>
+    <a href="#install">Установка</a>
+    <a class="gh" href="https://github.com/DanilShekarev/foreman">GitHub</a>
+  </nav>
+</div></header>
+
+<section id="hero">
+  <div class="wrap">
+    <h1>Чаты, база знаний и ИИ-агент.<br>На вашем сервере.</h1>
+    <p class="lead">Foreman — self-hosted платформа для командной работы:
+    переписка, markdown-документы под git, канбан-доска, созвоны — и агент,
+    который ведёт документацию, читая настоящий код проекта.</p>
+    <div class="btns">
+      <a class="btn primary" href="https://github.com/DanilShekarev/foreman">Код на GitHub</a>
+      <a class="btn" href="#install">Установка</a>
+    </div>
+    <img class="shot" src="img/vault.png" alt="Чат с агентом и открытый документ базы знаний">
+  </div>
+</section>
+
+<section id="features">
+  <div class="wrap">
+    <h2>Возможности</h2>
+    <p class="sub">Один сервер, одна SQLite-база, один git-репозиторий документов.
+    Фронтенд без сборки и без обращений к CDN.</p>
+    <div class="grid">
+      <div class="card"><h3>Чаты команды</h3>
+        <p>Каналы, личные сообщения, треды, реакции, закрепы, упоминания,
+        прочитанность, вложения и вставка скриншота из буфера.</p></div>
+      <div class="card"><h3>База знаний</h3>
+        <p>Markdown-документы под git: вики-ссылки и обратные ссылки, редактор
+        в браузере (WYSIWYG или разметка), история и откат любой правки,
+        импорт и экспорт Word.</p></div>
+      <div class="card"><h3>ИИ-агент</h3>
+        <p>Живёт в чате: ведёт документы и отвечает, как всё устроено на самом
+        деле, по зеркалу кода проекта. Каждый ход — git-коммит с diff
+        и кнопкой отката.</p></div>
+      <div class="card"><h3>Канбан-доска</h3>
+        <p>Задачи с drag &amp; drop, чеклистами, приоритетами, метками
+        и исполнителями. Агент умеет читать и обновлять доску.</p></div>
+      <div class="card"><h3>Созвоны</h3>
+        <p>Голосовые звонки WebRTC с демонстрацией экрана. Дорожка каждого
+        участника записывается и может расшифровываться в тред.</p></div>
+      <div class="card"><h3>Порядок в данных</h3>
+        <p>Вся база — один файл SQLite, вся история документов — обычный
+        git-репозиторий. Бэкап — копирование папки.</p></div>
+    </div>
+    <img class="shot" src="img/kanban.png" alt="Канбан-доска">
+  </div>
+</section>
+
+<section id="agent">
+  <div class="wrap">
+    <h2>Движки агента</h2>
+    <p class="sub">Модель выбирается на чат в админке; движка два, работают
+    взаимозаменяемо. Без обоих сервер тоже работает — остаются чаты, база
+    знаний и канбан.</p>
+    <table>
+      <tr><th>Движок</th><th>Что нужно</th></tr>
+      <tr><td><b>Claude</b> (Agent SDK)</td>
+          <td>Подписка Claude: Node.js + Claude Code CLI, токен командой
+          <code>claude setup-token</code></td></tr>
+      <tr><td><b>OpenAI-совместимый API</b></td>
+          <td>Любой эндпоинт — OpenRouter, локальный LLM-сервер и т.п.
+          Базовый URL и ключ в админке</td></tr>
+    </table>
+    <ul class="feat">
+      <li><b>Читает зеркало рабочей ветки</b> — только закоммиченное, без
+      незавершённых правок программистов; рабочую копию агент не видит.</li>
+      <li><b>Знает контекст команды</b> — профиль проекта и карта репозитория
+      лежат документами в базе знаний и правятся прямо в веб-редакторе.</li>
+      <li><b>Работает у всех на глазах</b> — ответ стримится в общий чат,
+      виден каждый вызванный инструмент.</li>
+    </ul>
+  </div>
+</section>
+
+<section id="security">
+  <div class="wrap">
+    <h2>Агент на коротком поводке</h2>
+    <p class="sub">Права ограничены технически, а не вежливостью промпта.</p>
+    <div class="grid">
+      <div class="card"><h3>Без shell</h3>
+        <p>Выполнять команды агент не может вовсе; git-коммиты делает сервер,
+        а не агент.</p></div>
+      <div class="card"><h3>Белый список инструментов</h3>
+        <p>Только чтение, поиск и правка текста. Веб, загрузки и подагенты
+        блокируются до выполнения.</p></div>
+      <div class="card"><h3>Песочница по путям</h3>
+        <p>Запись — только в общую базу знаний (и личную папку владельца
+        в личной сессии). Код проекта — только чтение.</p></div>
+      <div class="card"><h3>Всё обратимо</h3>
+        <p>Каждый ход — git-коммит только тронутых файлов; diff в чате,
+        откат одной кнопкой.</p></div>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <h2>Установка</h2>
+    <p class="sub">Требования: Python 3.10+ и git. Всё остальное первый запуск
+    поставит сам: создаст окружение, базу, git-репозиторий документов и
+    напечатает пароль администратора в консоль.</p>
+<pre><code>git clone https://github.com/DanilShekarev/foreman.git
+cd foreman
+./start.sh        <span class="c"># Windows: start.bat</span></code></pre>
+    <p class="note">Настройки необязательны и живут в файле <code>.env</code>
+    (образец — <code>.env.example</code>, задокументирована каждая переменная):
+    порт и адрес, путь к git-репозиторию проекта для агента, TURN для звонков,
+    расшифровка созвонов. Подробности — в
+    <a href="https://github.com/DanilShekarev/foreman#readme">README</a>.</p>
+  </div>
+</section>
+
+<footer><div class="wrap">
+  <span>Foreman — Данила Щекарев</span>
+  <a href="https://github.com/DanilShekarev/foreman/blob/main/LICENSE">AGPL-3.0</a>
+  <a href="https://github.com/DanilShekarev/foreman/blob/main/README.ru.md">README по-русски</a>
+  <a href="https://github.com/DanilShekarev/foreman/blob/main/CONTRIBUTING.md">Как контрибьютить</a>
+</div></footer>
+
+</body>
+</html>
