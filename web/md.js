@@ -30,8 +30,8 @@ const MD = (() => {
     s = s.replace(/~~([^~]+)~~/g, "<del>$1</del>");
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
     s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>");
-    s = s.replace(/\[\[([^\]]+)\]\]/g,
-      (m, name) => keep(`<span class="wikilink" data-wiki="${name.replace(/"/g,'&quot;')}">${name}</span>`));
+    s = s.replace(/\[\[([^\]|]+)(?:\|([^\]]*))?\]\]/g,
+      (m, target, alias) => keep(`<span class="wikilink" data-wiki="${target.replace(/"/g,'&quot;')}">${alias || target}</span>`));
     s = s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,
       (m, text, href) => keep(`<a href="${href}" target="_blank">${text}</a>`));
     s = s.replace(/(^|\s)@([a-zA-Z0-9_.-]+|агент)/g, (m, pre, login) => {
