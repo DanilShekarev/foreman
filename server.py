@@ -77,7 +77,8 @@ async def lifespan(app: FastAPI):
         target = VAULT / seed.name
         if not target.is_file():
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8")
+            target.write_text(seed.read_text(encoding="utf-8"), encoding="utf-8",
+                              newline="\n")
     gitops.ensure_repo_sync()
     manager.start()
     mirror_task = None
@@ -806,7 +807,7 @@ def _ensure_docx_md(p: Path) -> Optional[Path]:
     try:
         text = docx_io.docx_to_markdown(
             p.read_bytes(), p.parent / (p.name + ".assets"), p.name + ".assets")
-        md.write_text(text, encoding="utf-8")
+        md.write_text(text, encoding="utf-8", newline="\n")
         return md
     except Exception:
         return None
@@ -1838,13 +1839,14 @@ async def api_vault_upload(request: Request, file: UploadFile, folder: str = "sh
             assets_rel = "../" * depth + f"shared/_assets/{slug}"
             md = docx_io.docx_to_markdown(data, assets, assets_rel)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(md, encoding="utf-8")
+            target.write_text(md, encoding="utf-8", newline="\n")
         elif ext in (".md", ".markdown", ".txt"):
             target = vaultlib.safe_path(f"{folder.strip('/') or 'shared'}/{slug}.md")
             if not vaultlib.can_write(user, target):
                 return JSONResponse({"error": "сюда вам писать нельзя"}, status_code=403)
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(data.decode("utf-8", "replace"), encoding="utf-8")
+            target.write_text(data.decode("utf-8", "replace"), encoding="utf-8",
+                              newline="\n")
         else:
             return JSONResponse({"error": "поддерживаются .docx и .md"}, status_code=400)
     except vaultlib.VaultError as exc:

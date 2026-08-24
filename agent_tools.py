@@ -702,7 +702,8 @@ def native_tools(access: Access) -> list[SdkMcpTool]:
                         f" подлиннее или передай replace_all=true")
         try:
             p.write_text(text.replace(old, new) if replace_all
-                         else text.replace(old, new, 1), encoding="utf-8")
+                         else text.replace(old, new, 1),
+                         encoding="utf-8", newline="\n")
         except OSError as err:
             return _err(f"файл не записывается: {err}")
         return _ok(f"файл изменён: {p} (замен: {count if replace_all else 1})")
@@ -715,7 +716,8 @@ def native_tools(access: Access) -> list[SdkMcpTool]:
                         f" Код игры — только чтение.")
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_text(args.get("content") or "", encoding="utf-8")
+            p.write_text(args.get("content") or "", encoding="utf-8",
+                         newline="\n")
         except OSError as err:
             return _err(f"файл не записывается: {err}")
         return _ok(f"файл записан: {p}")

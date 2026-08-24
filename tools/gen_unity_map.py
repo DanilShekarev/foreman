@@ -113,7 +113,7 @@ def main() -> int:
     if not VAULT.is_dir():
         print(f"нет волта: {VAULT}")
         return 1
-    target.write_text(text, encoding="utf-8")
+    target.write_text(text, encoding="utf-8", newline="\n")
     if (VAULT / ".git").is_dir():
         subprocess.run(["git", "-C", str(VAULT), "add", "CODE_MAP.md"],
                        check=True, capture_output=True)

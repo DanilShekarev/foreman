@@ -179,7 +179,7 @@ def write_file(user: dict, rel: str, text: str) -> Path:
     if p.suffix.lower() not in MD_EXT:
         raise VaultError("через редактор сохраняются только .md")
     p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(text, encoding="utf-8")
+    p.write_text(text, encoding="utf-8", newline="\n")
     return p
 
 

@@ -61,7 +61,8 @@ def ensure_repo_sync() -> None:
     run("init")
     run("config", "user.name", "gd-assist")
     run("config", "user.email", "gd-assist@local")
-    (VAULT / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8")
+    (VAULT / ".gitattributes").write_text("* text=auto eol=lf\n", encoding="utf-8",
+                                          newline="\n")
     run("add", "-A")
     run("commit", "-m", "init vault", "--allow-empty")
 
