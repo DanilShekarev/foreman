@@ -1203,7 +1203,10 @@ const CHAT = (() => {
 
   async function refetchThread(scroll = false){
     if (!threadRoot) return;
-    const r = await fetch(`api/chats/${current.id}/messages?thread=${threadRoot.id}`);
+    // Тред тянем целиком (limit=1000 — потолок ручки): догрузки вверх, как
+    // у ленты, здесь нет, а расшифровка звонка легко даёт больше 60 реплик.
+    const r = await fetch(`api/chats/${current.id}/messages`
+                          + `?thread=${threadRoot.id}&limit=1000`);
     if (!r.ok) return;
     const data = await r.json();
     const stick = scroll || nearBottom(threadMessagesEl);
