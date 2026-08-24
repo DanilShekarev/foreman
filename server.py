@@ -132,7 +132,12 @@ class AuthMiddleware:
         # проверок; сам роутинг префикс снимает Starlette через root_path.
         if WEB_BASE and path.startswith(WEB_BASE):
             path = path[len(WEB_BASE):] or "/"
-        if path in ("/login", "/favicon.ico", "/favicon.svg") or path.startswith("/invite/"):
+        # PWA-статика публична: манифест и иконки браузер тянет без куки
+        # (запрос <link rel=manifest> идёт без credentials).
+        if path in ("/login", "/favicon.ico", "/favicon.svg",
+                    "/manifest.webmanifest", "/sw.js", "/icon-192.png",
+                    "/icon-512.png", "/apple-touch-icon.png") \
+                or path.startswith("/invite/"):
             return await self.app(scope, receive, send)
         req = Request(scope)
         conn = store.connect()
