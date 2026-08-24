@@ -136,7 +136,8 @@ class AuthMiddleware:
         # (запрос <link rel=manifest> идёт без credentials).
         if path in ("/login", "/favicon.ico", "/favicon.svg",
                     "/manifest.webmanifest", "/sw.js", "/icon-192.png",
-                    "/icon-512.png", "/apple-touch-icon.png") \
+                    "/icon-512.png", "/icon-maskable-192.png",
+                    "/icon-maskable-512.png", "/apple-touch-icon.png") \
                 or path.startswith("/invite/"):
             return await self.app(scope, receive, send)
         req = Request(scope)
