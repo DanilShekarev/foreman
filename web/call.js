@@ -16,6 +16,28 @@ const CALL = (() => {
     return u.toString();
   }
 
+  // Громкости (#99): мой микрофон 0–200% (gain в WebAudio-цепочке), каждый
+  // собеседник и звук демонстрации 0–100% (volume их <audio>). Помнятся
+  // между звонками: gd_call_vol_mic / _u<uid> / _screen.
+  function getVol(key){
+    const v = parseFloat(localStorage.getItem("gd_call_vol_" + key));
+    const max = key === "mic" ? 2 : 1;
+    return isNaN(v) ? 1 : Math.min(max, Math.max(0, v));
+  }
+
+  function applyVol(key, v){
+    if (!active) return;
+    if (key === "mic"){
+      if (active.micGain) active.micGain.gain.value = v;
+    } else if (key === "screen"){
+      const el = document.getElementById("call-screen-audio");
+      if (el) el.volume = v;
+    } else {
+      const p = active.pcs.get(+key.slice(1));
+      if (p && p.audioEl) p.audioEl.volume = v;
+    }
+  }
+
   // Выбранный микрофон помнится между звонками; ideal — если устройство
   // пропало, браузер молча возьмёт дефолтное, а не уронит getUserMedia.
   function micConstraints(exactId){
@@ -85,11 +107,12 @@ const CALL = (() => {
     comp.threshold.value = -28; comp.knee.value = 12; comp.ratio.value = 4;
     comp.attack.value = 0.003; comp.release.value = 0.25;
     const makeup = ctx.createGain(); makeup.gain.value = 1.2;
+    const micGain = ctx.createGain(); micGain.gain.value = getVol("mic");
     const dest = ctx.createMediaStreamDestination();
-    src.connect(hp).connect(comp).connect(makeup).connect(dest);
+    src.connect(hp).connect(comp).connect(makeup).connect(micGain).connect(dest);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
-    makeup.connect(analyser);
+    micGain.connect(analyser);
 
     let iceServers = [];
     try { iceServers = (await (await fetch("api/call/ice")).json()).iceServers || []; }
@@ -97,7 +120,7 @@ const CALL = (() => {
 
     active = {
       chat, callId: 0, session: 1, ws: null, closing: false,
-      ctx, mic, srcNode: src, hpNode: hp, outStream: dest.stream,
+      ctx, mic, srcNode: src, hpNode: hp, micGain, outStream: dest.stream,
       outTrack: dest.stream.getAudioTracks()[0],
       iceServers, pcs: new Map(), roster: new Map(),
       muted: false, sharing: false, screenStream: null,
@@ -168,12 +191,16 @@ const CALL = (() => {
   function newPeer(uid){
     const pc = new RTCPeerConnection({iceServers: active.iceServers});
     const p = {pc, polite: window.ME.id > uid, makingOffer: false,
-               ignoreOffer: false, audioEl: null, videoSender: null};
+               ignoreOffer: false, audioEl: null, videoSender: null,
+               screenAudioSender: null};
     active.pcs.set(uid, p);
     pc.addTrack(active.outTrack, active.outStream);
-    if (active.sharing && active.screenStream)
+    if (active.sharing && active.screenStream){
       p.videoSender = pc.addTrack(active.screenStream.getVideoTracks()[0],
                                   active.screenStream);
+      const sa = active.screenStream.getAudioTracks()[0];
+      if (sa) p.screenAudioSender = pc.addTrack(sa, active.screenStream);
+    }
     pc.onnegotiationneeded = async () => {
       try {
         p.makingOffer = true;
@@ -198,13 +225,31 @@ const CALL = (() => {
       }
     };
     pc.ontrack = e => {
+      const stream = e.streams[0] || new MediaStream([e.track]);
       if (e.track.kind === "audio"){
-        const stream = e.streams[0] || new MediaStream([e.track]);
+        // Звук демонстрации приходит в одном стриме с её видео; видео-трек
+        // добавляется отправителем первым, так что его m-line (и ontrack)
+        // раньше — screenSid к этому моменту уже известен.
+        if (stream.getVideoTracks().length ||
+            (active.screenSid && stream.id === active.screenSid)){
+          let el = document.getElementById("call-screen-audio");
+          if (!el){
+            el = document.createElement("audio");
+            el.id = "call-screen-audio";
+            el.autoplay = true;
+            ensureAudioBox().appendChild(el);
+          }
+          el.volume = getVol("screen");
+          el.srcObject = stream;
+          el.play().catch(() => {});
+          return;
+        }
         if (!p.audioEl){
           p.audioEl = document.createElement("audio");
           p.audioEl.autoplay = true;
           ensureAudioBox().appendChild(p.audioEl);
         }
+        p.audioEl.volume = getVol("u" + uid);
         p.audioEl.srcObject = stream;
         p.audioEl.play().catch(() => {});
         try {
@@ -214,8 +259,9 @@ const CALL = (() => {
           active.analysers.set(uid, an);
         } catch {}
       } else {
+        active.screenSid = stream.id;
         const name = (active.roster.get(uid) || {}).name || "";
-        setRemoteScreen(e.streams[0] || new MediaStream([e.track]), name);
+        setRemoteScreen(stream, name);
         e.track.onended = () => {
           if (active && active.sharerId === uid) setRemoteScreen(null, "");
         };
@@ -340,15 +386,20 @@ const CALL = (() => {
       stream = await navigator.mediaDevices.getDisplayMedia({
         video: {frameRate: {ideal: 15, max: 30},
                 width: {max: 1920}, height: {max: 1080}},
-        audio: false});
+        // Звук экрана/вкладки — если пользователь отметил галку в диалоге.
+        audio: true});
     } catch { return; }  // отменил выбор экрана
     active.screenStream = stream;
     active.sharing = true;
     active.sharerId = window.ME.id;
     const track = stream.getVideoTracks()[0];
+    const audio = stream.getAudioTracks()[0] || null;
     track.onended = () => stopShare(true);  // системная кнопка «Stop sharing»
-    for (const p of active.pcs.values())
+    for (const p of active.pcs.values()){
+      // Видео добавляется первым — приёмник по нему узнаёт стрим демонстрации.
       p.videoSender = p.pc.addTrack(track, stream);
+      if (audio) p.screenAudioSender = p.pc.addTrack(audio, stream);
+    }
     send({t: "state", muted: active.muted, sharing: true});
     setRemoteScreen(stream, "Ваш экран", true);
     renderDock();
@@ -370,6 +421,10 @@ const CALL = (() => {
         try { p.pc.removeTrack(p.videoSender); } catch {}
         p.videoSender = null;
       }
+      if (p.screenAudioSender){
+        try { p.pc.removeTrack(p.screenAudioSender); } catch {}
+        p.screenAudioSender = null;
+      }
     }
     if (notify) send({t: "state", muted: active.muted, sharing: false});
     renderDock();
@@ -388,6 +443,7 @@ const CALL = (() => {
     try { active.ctx.close(); } catch {}
     closeViewer();
     active = null;
+    closeVolPop();
     removeDock();
     removePill();
     const audioBox = document.getElementById("call-audio");
@@ -452,8 +508,56 @@ const CALL = (() => {
     </div>`;
   }
 
+  // Поповер громкостей: контекстное меню не годится — оно закрывается по
+  // любому клику, а слайдер надо таскать.
+  function closeVolPop(){
+    const pop = document.getElementById("call-vol-pop");
+    if (pop) pop.remove();
+    document.removeEventListener("mousedown", onVolPopOutside);
+  }
+
+  function onVolPopOutside(e){
+    const pop = document.getElementById("call-vol-pop");
+    const t = e.target instanceof Element ? e.target : null;
+    if (pop && (!t || (!pop.contains(t) && !t.closest("#call-vol"))))
+      closeVolPop();
+  }
+
+  function toggleVolPop(e){
+    if (document.getElementById("call-vol-pop")){ closeVolPop(); return; }
+    if (!active) return;
+    const row = (label, key, max) => {
+      const v = Math.round(getVol(key) * 100);
+      return `<div class="cvp-row"><span class="cvp-name">${label}</span>
+        <input type="range" min="0" max="${max}" value="${v}" data-key="${key}">
+        <b class="cvp-val">${v}%</b></div>`;
+    };
+    let html = row(`${ICON("mic", "sm")} Мой микрофон`, "mic", 200);
+    for (const p of active.roster.values())
+      html += row(MD.esc(p.name), "u" + p.id, 100);
+    if (active.sharerId && active.sharerId !== window.ME.id)
+      html += row(`${ICON("screen", "sm")} Демонстрация`, "screen", 100);
+    const pop = document.createElement("div");
+    pop.id = "call-vol-pop";
+    pop.innerHTML = html;
+    document.body.appendChild(pop);
+    const r = e.currentTarget.getBoundingClientRect();
+    pop.style.left = Math.min(r.left, window.innerWidth - pop.offsetWidth - 8) + "px";
+    pop.style.top = (r.bottom + 6) + "px";
+    pop.oninput = ev => {
+      const inp = ev.target;
+      if (!inp.dataset.key) return;
+      const v = (+inp.value) / 100;
+      localStorage.setItem("gd_call_vol_" + inp.dataset.key, String(v));
+      applyVol(inp.dataset.key, v);
+      inp.parentElement.querySelector(".cvp-val").textContent = inp.value + "%";
+    };
+    document.addEventListener("mousedown", onVolPopOutside);
+  }
+
   function renderDock(){
     updatePlacement();
+    closeVolPop();  // состав участников мог поменяться
     if (!active){
       // В открытом чате идёт чужой звонок — плашка «присоединиться».
       const cur = CHAT.currentId();
@@ -490,6 +594,7 @@ const CALL = (() => {
           title="${active.muted ? "Включить микрофон" : "Выключить микрофон"}">
           ${ICON(active.muted ? "mic-off" : "mic")}</button>
         <button id="call-mic-pick" title="Выбрать микрофон">${ICON("chevron-down", "sm")}</button>
+        <button id="call-vol" title="Громкость">${ICON("volume")}</button>
         <button id="call-share" class="${active.sharing ? "accent-on" : ""}"
           title="${active.sharing ? "Остановить демонстрацию" : "Демонстрация экрана"}">
           ${ICON(active.sharing ? "screen-off" : "screen")}</button>
@@ -502,6 +607,7 @@ const CALL = (() => {
       }
     dock.querySelector("#call-mute").onclick = toggleMute;
     dock.querySelector("#call-mic-pick").onclick = pickMic;
+    dock.querySelector("#call-vol").onclick = toggleVolPop;
     dock.querySelector("#call-share").onclick = toggleShare;
     dock.querySelector("#call-leave").onclick = leave;
     dock.querySelector("#call-screen-expand").onclick = () => openViewer();
@@ -517,6 +623,9 @@ const CALL = (() => {
     if (!stream){
       box.style.display = "none";
       if (video) video.srcObject = null;
+      const sa = document.getElementById("call-screen-audio");
+      if (sa) sa.srcObject = null;
+      if (active) active.screenSid = null;
       closeViewer();
       return;
     }
