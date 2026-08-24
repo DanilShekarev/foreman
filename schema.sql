@@ -18,6 +18,21 @@ CREATE TABLE IF NOT EXISTS users (
     disabled_at  TEXT
 );
 
+-- Роли — команда заводит свои («программист», «ГД», «художник»); is_system=1 —
+-- встроенная «Модератор», её нельзя удалить, назначает только админ.
+CREATE TABLE IF NOT EXISTS roles (
+    id         INTEGER PRIMARY KEY,
+    name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+    is_system  INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS user_roles (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role_id INTEGER NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
+    PRIMARY KEY (user_id, role_id)
+);
+
 CREATE TABLE IF NOT EXISTS auth_sessions (
     token      TEXT PRIMARY KEY,
     user_id    INTEGER NOT NULL REFERENCES users(id),

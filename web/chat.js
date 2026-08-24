@@ -27,6 +27,13 @@ const CHAT = (() => {
   let pendingNewSep = false;   // вычислить границу при ближайшем refetch (открытие)
   let mentionRoots = null;     // корни тредов с непрочитанными @меня (#81)
 
+  // Клик по названию чата с людьми — список участников с ролями.
+  titleEl.onclick = e => {
+    if (!current || current.kind === "agent" || !memberIds.length) return;
+    e.stopPropagation();
+    APP.showMembers(e.clientX, e.clientY, memberIds);
+  };
+
   // ------------------------------------------------------------- открытие
 
   async function open(chat){
@@ -34,6 +41,8 @@ const CHAT = (() => {
     current = chat;
     closeThread();
     titleEl.innerHTML = chatLabel(chat);
+    titleEl.classList.toggle("members", chat.kind !== "agent");
+    titleEl.title = chat.kind !== "agent" ? "Участники" : "";
     messagesEl.innerHTML = "<div class='msg system'>загрузка…</div>";
     document.getElementById("btn-pins").style.display = "";
     document.getElementById("btn-files").style.display = "";
@@ -404,6 +413,14 @@ const CHAT = (() => {
     </div>`;
     const main = div.querySelector(".msg-main");
     const body = div.querySelector(".body");
+    if (m.author_kind === "user" && m.author_user_id){
+      const authorEl = div.querySelector(".author");
+      authorEl.classList.add("clickable");
+      authorEl.onclick = e => {
+        e.stopPropagation();
+        APP.showProfile(e.clientX, e.clientY, m.author_user_id, m.author_name);
+      };
+    }
     if (m.reply_to){
       const q = document.createElement("div");
       q.className = "reply-quote";

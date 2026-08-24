@@ -304,16 +304,22 @@ class SessionManager:
         conn = store.connect()
         try:
             owner_login = owner_name = None
+            owner_roles: list[str] = []
             if chat.get("owner_user_id"):
                 owner = store.get_user(conn, chat["owner_user_id"])
                 owner_login, owner_name = owner["login"], owner["display_name"]
-            member_names = [store.get_user(conn, uid)["display_name"]
-                            for uid in store.chat_member_ids(conn, chat["id"])]
+                owner_roles = store.user_roles(conn, owner["id"])
+            member_names = []
+            for uid in store.chat_member_ids(conn, chat["id"]):
+                u = store.get_user(conn, uid)
+                roles = store.user_roles(conn, uid)
+                member_names.append(
+                    u["display_name"] + (f" ({', '.join(roles)})" if roles else ""))
         finally:
             conn.close()
         system_prompt = prompts.build_prompt(
             chat, owner_login=owner_login, owner_name=owner_name,
-            members=member_names)
+            owner_roles=owner_roles, members=member_names)
         s = AgentSession(chat, owner_login, system_prompt)
         s.worker = asyncio.create_task(self._worker(s))
         self.sessions[chat["id"]] = s

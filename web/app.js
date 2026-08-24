@@ -17,7 +17,7 @@ const APP = (() => {
     if (!meResp.ok){ location.href = "login"; return; }
     window.ME = await meResp.json();
     document.getElementById("me-name").textContent = window.ME.display_name;
-    if (window.ME.is_admin)
+    if (window.ME.is_admin || window.ME.can_manage_roles)
       document.getElementById("btn-admin").style.display = "";
     window.USERS = await (await fetch("api/users")).json();
     await refreshChats();
@@ -539,8 +539,13 @@ const APP = (() => {
   document.getElementById("btn-admin").onclick = openAdmin;
 
   async function openAdmin(){
-    const users = await (await fetch("api/admin/users")).json();
-    const invites = await (await fetch("api/admin/invites")).json();
+    // Модератор видит только пользователей с ролями; всё остальное — админу.
+    const isAdmin = window.ME.is_admin;
+    const roles = await (await fetch("api/roles")).json();
+    const users = await (await fetch(isAdmin ? "api/admin/users" : "api/users")).json();
+    const invites = isAdmin ? await (await fetch("api/admin/invites")).json() : [];
+    const chips = u => (u.roles || []).map(r =>
+      `<span class="role-chip">${MD.esc(r)}</span>`).join("");
     const inviteRow = i => {
       if (i.pending){
         // относительно текущей страницы: работает и на :8010/, и за /gd/
@@ -554,28 +559,61 @@ const APP = (() => {
       const status = i.used_login ? `использована — @${MD.esc(i.used_login)}` : "истекла";
       return `<div class="admin-user off"><span class="who"><small>${status}</small></span></div>`;
     };
-    openModal(`
-      <h3>Пользователи</h3>
-      <div id="admin-list">${users.map(u => `
-        <div class="admin-user${u.disabled_at ? " off" : ""}" data-id="${u.id}">
-          <span class="who">${MD.esc(u.display_name)} <small>@${u.login}${u.is_admin ? " · админ" : ""}</small></span>
-          <button class="b-pass" title="Сбросить пароль">${ICON("key")}</button>
-          <button class="b-off" title="${u.disabled_at ? "Включить" : "Отключить"}">${u.disabled_at ? ICON("play") : ICON("pause")}</button>
-        </div>`).join("")}</div>
+    const adminOnly = `
       <hr>
       <h3>Приглашения</h3>
       <p style="font-size:12px;color:var(--fg-dim);margin:0 0 8px">Ссылка одноразовая:
       человек сам выбирает логин и пароль, после регистрации ссылка гаснет.
       Неиспользованная — истекает через 7 дней.</p>
-      <div id="inv-list">${invites.map(inviteRow).join("") || "<i>приглашений нет</i>"}</div>
+      <div id="inv-list">${invites.map(inviteRow).join("") || "<i>приглашений нет</i>"}</div>`;
+    openModal(`
+      <h3>Пользователи</h3>
+      <div id="admin-list">${users.map(u => `
+        <div class="admin-user${u.disabled_at ? " off" : ""}" data-id="${u.id}">
+          <span class="who">${MD.esc(u.display_name)} <small>@${u.login}${u.is_admin ? " · админ" : ""}</small>${chips(u)}</span>
+          <button class="b-roles" title="Роли">${ICON("tag")}</button>
+          ${isAdmin ? `<button class="b-pass" title="Сбросить пароль">${ICON("key")}</button>
+          <button class="b-off" title="${u.disabled_at ? "Включить" : "Отключить"}">${u.disabled_at ? ICON("play") : ICON("pause")}</button>` : ""}
+        </div>`).join("")}</div>
+      <hr>
+      <h3>Роли</h3>
+      <div id="role-list">${roles.map(r => `
+        <div class="admin-user" data-role="${r.id}">
+          <span class="who">${MD.esc(r.name)}${r.is_system ? " <small>встроенная</small>" : ""}</span>
+          ${r.is_system ? "" : `<button class="b-role-del" title="Удалить роль">${ICON("trash")}</button>`}
+        </div>`).join("")}</div>
+      <div class="row" style="justify-content:flex-start">
+        <input type="text" id="role-new" placeholder="Новая роль" style="flex:1;margin:0">
+        <button id="role-add">${ICON("plus")} Добавить</button></div>
+      ${isAdmin ? adminOnly : ""}
       <div class="row"><button id="m-cancel">Закрыть</button>
-        <button id="m-llm">${ICON("spark")} Модели агента</button>
-        <button id="m-invite">${ICON("plus")} Ссылка-приглашение</button></div>`);
-    modal.querySelector("#m-llm").onclick = openLlm;
+        ${isAdmin ? `<button id="m-llm">${ICON("spark")} Модели агента</button>
+        <button id="m-invite">${ICON("plus")} Ссылка-приглашение</button>` : ""}</div>`);
+    if (isAdmin) modal.querySelector("#m-llm").onclick = openLlm;
     modal.querySelector("#m-cancel").onclick = closeModal;
+    modal.querySelector("#role-add").onclick = async () => {
+      const name = modal.querySelector("#role-new").value.trim();
+      if (!name) return;
+      const r = await fetch("api/roles", {
+        method: "POST", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({name}),
+      });
+      const data = await r.json();
+      if (data.error){ showAlert(data.error); return; }
+      openAdmin();
+    };
+    modal.querySelectorAll(".b-role-del").forEach(btn => btn.onclick = async () => {
+      const r = await fetch(`api/roles/${btn.closest("[data-role]").dataset.role}`,
+                            {method: "DELETE"});
+      const data = await r.json();
+      if (data.error){ showAlert(data.error); return; }
+      openAdmin();
+    });
     modal.querySelectorAll(".admin-user[data-id]").forEach(row => {
       const id = row.dataset.id;
       const u = users.find(x => String(x.id) === id);
+      row.querySelector(".b-roles").onclick = () => editUserRoles(u, roles);
+      if (!isAdmin) return;
       row.querySelector(".b-pass").onclick = async () => {
         const pw = prompt(`Новый пароль для @${u.login}:`);
         if (!pw) return;
@@ -609,8 +647,31 @@ const APP = (() => {
         openAdmin();
       };
     });
-    modal.querySelector("#m-invite").onclick = async () => {
-      const r = await fetch("api/admin/invites", {method: "POST"});
+    if (isAdmin)
+      modal.querySelector("#m-invite").onclick = async () => {
+        const r = await fetch("api/admin/invites", {method: "POST"});
+        const data = await r.json();
+        if (data.error){ showAlert(data.error); return; }
+        openAdmin();
+      };
+  }
+
+  function editUserRoles(u, roles){
+    openModal(`
+      <h3>Роли — ${MD.esc(u.display_name)}</h3>
+      <div id="role-picks">${roles.map(r => `
+        <label style="display:block;margin:4px 0"><input type="checkbox" value="${r.id}"
+          ${(u.roles || []).includes(r.name) ? "checked" : ""}> ${MD.esc(r.name)}</label>`).join("") ||
+        "<i>ролей пока нет</i>"}</div>
+      <div class="row"><button id="m-cancel">Отмена</button><button id="m-ok">Сохранить</button></div>`);
+    modal.querySelector("#m-cancel").onclick = openAdmin;
+    modal.querySelector("#m-ok").onclick = async () => {
+      const ids = [...modal.querySelectorAll("#role-picks input:checked")]
+        .map(cb => +cb.value);
+      const r = await fetch(`api/users/${u.id}/roles`, {
+        method: "PUT", headers: {"Content-Type": "application/json"},
+        body: JSON.stringify({role_ids: ids}),
+      });
       const data = await r.json();
       if (data.error){ showAlert(data.error); return; }
       openAdmin();
@@ -843,6 +904,31 @@ const APP = (() => {
     return menu;
   }
 
+  // Карточка человека: имя, логин, чипы ролей. Рисуется тем же #ctx-menu.
+  function profileCard(u, fallbackName){
+    const name = u ? u.display_name : fallbackName;
+    const chips = (u && u.roles || []).map(r =>
+      `<span class="role-chip">${MD.esc(r)}</span>`).join("");
+    return `<div class="profile-card"><b>${MD.esc(name || "")}</b>${
+      u ? ` <small>@${MD.esc(u.login)}</small>` : ""}${
+      chips ? `<div class="profile-roles">${chips}</div>` : ""}</div>`;
+  }
+
+  function showProfile(x, y, userId, fallbackName){
+    const u = (window.USERS || []).find(v => v.id === userId);
+    openContextMenu(x, y, [], profileCard(u, fallbackName));
+  }
+
+  function showMembers(x, y, memberIds){
+    const rows = memberIds
+      .map(id => (window.USERS || []).find(u => u.id === id))
+      .filter(Boolean)
+      .map(u => profileCard(u));
+    if (!rows.length) return;
+    openContextMenu(x, y, [],
+      `<div class="profile-list"><b class="profile-title">Участники</b>${rows.join("")}</div>`);
+  }
+
   function openContextMenu(x, y, items, headerHtml = ""){
     const menu = ensureCtxMenu();
     menu.innerHTML = headerHtml + items.map((it, i) =>
@@ -862,6 +948,7 @@ const APP = (() => {
 
   boot();
   return { refreshChats, showVault, selectChat, pickFromList, afterChatDeleted,
-           openContextMenu, rerenderLists: renderChatLists, alert: showAlert,
+           openContextMenu, showProfile, showMembers,
+           rerenderLists: renderChatLists, alert: showAlert,
            chatById: id => chats.find(c => c.id === id) };
 })();

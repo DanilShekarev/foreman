@@ -736,6 +736,25 @@ option{background:var(--bg1);color:var(--fg)}
   display:inline-flex;justify-content:center}
 #ctx-menu .ctx-item.danger .ci-icon{color:var(--red)}
 
+/* ============================================== роли и карточки людей */
+.role-chip{display:inline-block;margin-left:6px;padding:1px 7px;
+  font-size:11px;line-height:16px;border-radius:9px;white-space:nowrap;
+  background:var(--accent-soft);color:var(--accent);
+  border:1px solid color-mix(in srgb, var(--accent) 35%, transparent)}
+.profile-card{padding:7px 10px;font-size:13px;max-width:280px}
+.profile-card small{color:var(--fg-faint)}
+.profile-card .profile-roles{margin-top:5px}
+.profile-card .profile-roles .role-chip:first-child{margin-left:0}
+.profile-list{padding:2px 0}
+.profile-list .profile-title{display:block;padding:5px 10px 3px;font-size:12px;
+  color:var(--fg-dim)}
+.profile-list .profile-card{border-top:1px solid var(--border)}
+.profile-list .profile-card:first-of-type{border-top:none}
+.msg .author.clickable{cursor:pointer}
+.msg .author.clickable:hover{text-decoration:underline}
+#chat-title.members{cursor:pointer}
+#chat-title.members:hover{color:var(--fg)}
+
 /* ============================================================ канбан задач */
 #kanban-view{position:fixed;left:248px;top:0;right:0;bottom:0;z-index:12;
   background:var(--bg0);display:flex;flex-direction:column}

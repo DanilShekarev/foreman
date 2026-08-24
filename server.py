@@ -359,10 +359,13 @@ async def api_me(request: Request):
     conn = store.connect()
     try:
         models, default = llm.catalog(conn), llm.default_choice(conn)
+        roles = store.user_roles(conn, u["id"])
+        manage = store.can_manage_roles(conn, u)
     finally:
         conn.close()
     return {"id": u["id"], "login": u["login"], "display_name": u["display_name"],
             "is_admin": bool(u["is_admin"]),
+            "roles": roles, "can_manage_roles": manage,
             "models": models, "model_default": default}
 
 
@@ -510,7 +513,8 @@ async def api_users(request: Request):
         users = [u for u in store.list_users(conn) if not u["disabled_at"]]
     finally:
         conn.close()
-    return [{"id": u["id"], "login": u["login"], "display_name": u["display_name"]}
+    return [{"id": u["id"], "login": u["login"], "display_name": u["display_name"],
+             "roles": u["roles"]}
             for u in users]
 
 
@@ -556,6 +560,55 @@ async def admin_patch_user(user_id: int, request: Request):
         if "disabled" in body:
             store.set_disabled(conn, user_id, bool(body["disabled"]))
         return {"ok": True}
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+# --------------------------------------------------------------- роли
+
+@app.get("/api/roles")
+async def api_roles(request: Request):
+    conn = store.connect()
+    try:
+        return store.list_roles(conn)
+    finally:
+        conn.close()
+
+
+@app.post("/api/roles")
+async def api_role_create(request: Request):
+    body = await request.json()
+    conn = store.connect()
+    try:
+        return store.create_role(conn, me(request), body.get("name") or "")
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.delete("/api/roles/{role_id}")
+async def api_role_delete(role_id: int, request: Request):
+    conn = store.connect()
+    try:
+        store.delete_role(conn, me(request), role_id)
+        return {"ok": True}
+    except store.StoreError as exc:
+        return _err(exc)
+    finally:
+        conn.close()
+
+
+@app.put("/api/users/{user_id}/roles")
+async def api_user_roles(user_id: int, request: Request):
+    body = await request.json()
+    conn = store.connect()
+    try:
+        roles = store.set_user_roles(conn, me(request), user_id,
+                                     body.get("role_ids") or [])
+        return {"roles": roles}
     except store.StoreError as exc:
         return _err(exc)
     finally:

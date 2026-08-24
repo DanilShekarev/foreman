@@ -140,12 +140,14 @@ def _code_section() -> str:
 
 
 def build_prompt(chat: dict, *, owner_login: str | None,
-                 owner_name: str | None, members: list[str]) -> str:
+                 owner_name: str | None, members: list[str],
+                 owner_roles: list[str] | None = None) -> str:
     parts = [_base()]
     if chat["kind"] == "agent":
         personal = VAULT / "personal" / (owner_login or "")
+        roles = f", роль: {', '.join(owner_roles)}" if owner_roles else ""
         parts.append(
-            f"## Этот чат\nЛичный чат дизайнера {owner_name} ({owner_login}).\n"
+            f"## Этот чат\nЛичный чат дизайнера {owner_name} ({owner_login}{roles}).\n"
             f"Писать можно в shared/ и в личную папку дизайнера: {personal}.\n"
             f"Личные папки других людей для тебя не существуют.")
     elif chat["kind"] == "channel":

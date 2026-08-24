@@ -23,6 +23,7 @@ SCHEMA_VERSION = "1"
 NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ','now')"
 
 AGENT_NAME = "Агент"
+MODERATOR_ROLE = "Модератор"
 # Как зовут агента в сообщениях: @агент / @agent (регистр не важен).
 AGENT_MENTION = re.compile(r"(^|\W)@(агент|agent)\b", re.IGNORECASE)
 LOGIN_MENTION = re.compile(r"(^|\W)@([a-zA-Z0-9_.-]+)")
@@ -95,6 +96,8 @@ def init_db(conn: sqlite3.Connection) -> None:
                      ("due_date", "TEXT"), ("updated_by", "INTEGER")):
         if col not in kcols:
             conn.execute(f"ALTER TABLE kanban_cards ADD COLUMN {col} {ddl}")
+    conn.execute(f"INSERT OR IGNORE INTO roles(name, is_system, created_at)"
+                 f" VALUES (?, 1, {NOW_SQL})", (MODERATOR_ROLE,))
 
 
 # --------------------------------------------------------------- пользователи
@@ -170,7 +173,104 @@ def list_users(conn: sqlite3.Connection) -> list[dict]:
     rows = conn.execute(
         "SELECT id, login, display_name, is_admin, created_at, disabled_at"
         " FROM users ORDER BY login").fetchall()
+    users = [dict(r) for r in rows]
+    roles: dict[int, list[str]] = {}
+    for r in conn.execute(
+            "SELECT ur.user_id, r.name FROM user_roles ur"
+            " JOIN roles r ON r.id = ur.role_id ORDER BY r.name"):
+        roles.setdefault(r["user_id"], []).append(r["name"])
+    for u in users:
+        u["roles"] = roles.get(u["id"], [])
+    return users
+
+
+# --------------------------------------------------------------- роли
+
+def list_roles(conn: sqlite3.Connection) -> list[dict]:
+    rows = conn.execute(
+        "SELECT id, name, is_system FROM roles ORDER BY is_system DESC, name")
     return [dict(r) for r in rows]
+
+
+def user_roles(conn: sqlite3.Connection, user_id: int) -> list[str]:
+    rows = conn.execute(
+        "SELECT r.name FROM user_roles ur JOIN roles r ON r.id = ur.role_id"
+        " WHERE ur.user_id = ? ORDER BY r.name", (user_id,))
+    return [r["name"] for r in rows]
+
+
+def is_moderator(conn: sqlite3.Connection, user_id: int) -> bool:
+    row = conn.execute(
+        "SELECT 1 FROM user_roles ur JOIN roles r ON r.id = ur.role_id"
+        " WHERE ur.user_id = ? AND r.name = ?",
+        (user_id, MODERATOR_ROLE)).fetchone()
+    return row is not None
+
+
+def can_manage_roles(conn: sqlite3.Connection, user: dict) -> bool:
+    return bool(user["is_admin"]) or is_moderator(conn, user["id"])
+
+
+def _require_role_manager(conn: sqlite3.Connection, actor: dict) -> None:
+    if not can_manage_roles(conn, actor):
+        raise Forbidden("роли назначают админ или модератор")
+
+
+def create_role(conn: sqlite3.Connection, actor: dict, name: str) -> dict:
+    _require_role_manager(conn, actor)
+    name = " ".join(name.split())
+    if not 1 <= len(name) <= 32:
+        raise StoreError("название роли: 1–32 символа")
+    # UNIQUE COLLATE NOCASE не сворачивает кириллицу — дубль ловим сами.
+    if any(r["name"].casefold() == name.casefold() for r in list_roles(conn)):
+        raise StoreError(f"роль «{name}» уже есть")
+    with write_tx(conn):
+        try:
+            cur = conn.execute(
+                f"INSERT INTO roles(name, is_system, created_at)"
+                f" VALUES (?, 0, {NOW_SQL})", (name,))
+        except sqlite3.IntegrityError:
+            raise StoreError(f"роль «{name}» уже есть") from None
+    return {"id": cur.lastrowid, "name": name, "is_system": 0}
+
+
+def delete_role(conn: sqlite3.Connection, actor: dict, role_id: int) -> None:
+    _require_role_manager(conn, actor)
+    row = conn.execute("SELECT name, is_system FROM roles WHERE id = ?",
+                       (role_id,)).fetchone()
+    if row is None:
+        raise NotFound("нет такой роли")
+    if row["is_system"]:
+        raise Forbidden(f"роль «{row['name']}» встроенная, её нельзя удалить")
+    with write_tx(conn):
+        conn.execute("DELETE FROM user_roles WHERE role_id = ?", (role_id,))
+        conn.execute("DELETE FROM roles WHERE id = ?", (role_id,))
+
+
+def set_user_roles(conn: sqlite3.Connection, actor: dict, user_id: int,
+                   role_ids: list[int]) -> list[str]:
+    _require_role_manager(conn, actor)
+    get_user(conn, user_id)
+    wanted = {int(r) for r in role_ids}
+    known = {r["id"]: r for r in list_roles(conn)}
+    if wanted - set(known):
+        raise NotFound("нет такой роли")
+    if not actor["is_admin"]:
+        # Модератора раздаёт только админ — модератор не может ни выдать её,
+        # ни снять (в том числе с себя).
+        mod_id = next(r["id"] for r in known.values()
+                      if r["name"] == MODERATOR_ROLE)
+        had = mod_id in set(
+            r["role_id"] for r in conn.execute(
+                "SELECT role_id FROM user_roles WHERE user_id = ?", (user_id,)))
+        if (mod_id in wanted) != had:
+            raise Forbidden("роль «Модератор» назначает и снимает только админ")
+    with write_tx(conn):
+        conn.execute("DELETE FROM user_roles WHERE user_id = ?", (user_id,))
+        conn.executemany(
+            "INSERT INTO user_roles(user_id, role_id) VALUES (?,?)",
+            [(user_id, rid) for rid in wanted])
+    return user_roles(conn, user_id)
 
 
 # --------------------------------------------------------------- auth-сессии
