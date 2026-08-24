@@ -51,6 +51,9 @@ const APP = (() => {
       if (r.ok){ window.USERS = await r.json(); renderUsers(); }
     }, 60000);
     initVaultResizer();
+    // Путь фиксированный, без ?v= — смена URL означала бы для браузера новый SW.
+    if ("serviceWorker" in navigator)
+      navigator.serviceWorker.register("sw.js").catch(() => {});
   }
 
   // Поллинг: 3 с в активной вкладке, 15 с в фоновой — через интернет фоновые

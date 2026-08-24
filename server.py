@@ -8,6 +8,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import mimetypes
 import time
 import os
 import re
@@ -2041,10 +2042,18 @@ async def index_page(request: Request):
                         headers={"Cache-Control": "no-cache"})
 
 
+# В реестре Windows .webmanifest не значится — StaticFiles отдал бы octet-stream.
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
+
 class ImmutableStatic(StaticFiles):
+    # sw.js и манифест браузер запрашивает по постоянному URL без ?v= —
+    # immutable заморозил бы их обновление на год.
+    _NO_CACHE = (".html", "sw.js", ".webmanifest")
+
     def file_response(self, *args, **kwargs):
         resp = super().file_response(*args, **kwargs)
-        if str(getattr(resp, "path", "")).endswith(".html"):
+        if str(getattr(resp, "path", "")).endswith(self._NO_CACHE):
             resp.headers["Cache-Control"] = "no-cache"
         else:
             resp.headers["Cache-Control"] = "public, max-age=31536000, immutable"
