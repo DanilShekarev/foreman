@@ -841,6 +841,9 @@ const CALL = (() => {
       viewerEl.style.display = "none";
       viewerEl.querySelector("video").srcObject = null;
     }
+    // Окно звонка перекрывало чат (CALL.isOpen в chatVisible) — по закрытии
+    // помечаем накопившееся, как это делает закрытие доски задач.
+    if (typeof CHAT !== "undefined" && CHAT.markVisible) CHAT.markVisible();
   }
 
   // ------------------------------------------------------------- дозвон

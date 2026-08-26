@@ -55,8 +55,10 @@ const CHAT = (() => {
     chatReads = [];
     memberIds = [];
     lastMsgId = 0;  // id глобальные: без сброса чужой чат дал бы ложный «блип»
+    lastSentRead = 0;
+    threadMaxId = 0;
     // Черта «Новые сообщения»: границу считаем по reads ПЕРВОГО refetch
-    // (markRead тут же сдвинет прочитанность — позже будет поздно), окно
+    // (maybeMarkRead сдвинет прочитанность — позже будет поздно), окно
     // истории сразу берём с запасом, чтобы черта попала в выборку.
     newSepId = 0;
     pendingNewSep = true;
@@ -124,7 +126,7 @@ const CHAT = (() => {
         mentionRoots.some(id => !prevRoots.includes(id)))
       SOUND.mention();
     // Граница непрочитанного — по СВОЕЙ отметке из этого же ответа (reads
-    // сняты до того, как markRead ниже её сдвинет): первое чужое сообщение
+    // сняты до того, как maybeMarkRead ниже её сдвинет): первое чужое сообщение
     // новее прочитанного.
     if (pendingNewSep){
       pendingNewSep = false;
@@ -164,11 +166,7 @@ const CHAT = (() => {
     const prevLast = lastMsgId;
     if (data.messages.length){
       lastMsgId = data.messages[data.messages.length - 1].id;
-      // Фоновая вкладка или открытая доска задач не помечают прочитанным:
-      // пользователь не видел сообщений (галочки честные), а рост
-      // непрочитанных — триггер звука и нотификации. Отметка — при возврате
-      // (visibilitychange / закрытие доски).
-      if (chatVisible()) markRead();
+      maybeMarkRead();
     }
     // Звук входящих в ОТКРЫТОМ чате — по самим сообщениям, детерминированно
     // (другие чаты озвучивает maybeNotify по росту непрочитанных).
@@ -185,9 +183,8 @@ const CHAT = (() => {
     }
   }
 
-  document.addEventListener("visibilitychange", () => {
-    if (chatVisible() && lastMsgId) markRead();
-  });
+  document.addEventListener("visibilitychange", () => maybeMarkRead());
+  window.addEventListener("focus", () => maybeMarkRead());
 
   function updatePinBtn(n){
     document.getElementById("pin-count").textContent = n ? " " + n : "";
@@ -201,6 +198,7 @@ const CHAT = (() => {
   let histLimit = 60, histEnd = false, histLoading = false;
 
   messagesEl.addEventListener("scroll", async () => {
+    if (lastMsgId > lastSentRead) maybeMarkRead();
     if (messagesEl.scrollTop > 150 || histLoading || histEnd ||
         !current || streaming) return;
     histLoading = true;
@@ -241,13 +239,42 @@ const CHAT = (() => {
            !(typeof CALL !== "undefined" && CALL.isOpen());
   }
 
-  function markRead(){
-    if (!current || !lastMsgId) return;
+  // Пользователь за компьютером: окно в фокусе и был ввод за последнюю
+  // минуту. Видимое, но неактивное окно (фон, второй монитор, отошёл от
+  // компьютера) сообщений не «читает».
+  let lastActivity = Date.now();
+  function userActive(){
+    return document.hasFocus() && Date.now() - lastActivity < 60000;
+  }
+
+  // Единая точка отметки прочитанного. Галочки честные: помечаем, только
+  // когда пользователь внимателен (chatVisible + userActive) и лента/тред
+  // прокручены к низу — новые сообщения реально в поле зрения. Пропущенная
+  // отметка ставится при возвращении внимания: focus / visibilitychange /
+  // первый ввод / докрутка вниз / закрытие оверлея (доска, звонок).
+  let lastSentRead = 0, threadMaxId = 0;
+  function maybeMarkRead(){
+    if (!current || !chatVisible() || !userActive()) return;
+    let id = 0;
+    if (lastMsgId > lastSentRead && nearBottom(messagesEl)) id = lastMsgId;
+    if (threadRoot && threadMaxId > lastSentRead &&
+        nearBottom(threadMessagesEl)) id = Math.max(id, threadMaxId);
+    if (!id) return;
+    lastSentRead = id;
     fetch(`api/chats/${current.id}/read`, {
       method: "POST", headers: {"Content-Type": "application/json"},
-      body: JSON.stringify({last_message_id: lastMsgId}),
+      body: JSON.stringify({last_message_id: id}),
     }).then(() => APP.refreshChats());
   }
+
+  ["pointermove", "pointerdown", "keydown", "wheel"].forEach(ev =>
+    window.addEventListener(ev, () => {
+      lastActivity = Date.now();
+      // Дешёвый ранний выход: layout-чтения в nearBottom — только когда
+      // есть что помечать.
+      if (lastMsgId > lastSentRead || threadMaxId > lastSentRead)
+        maybeMarkRead();
+    }, {passive: true}));
 
   // ------------------------------------------------- модель агента чата
 
@@ -1194,6 +1221,7 @@ const CHAT = (() => {
 
   function closeThread(){
     threadRoot = null;
+    threadMaxId = 0;
     threadPane.style.display = "none";
     threadInputEl.value = "";
     const appEl = document.getElementById("app");
@@ -1219,17 +1247,16 @@ const CHAT = (() => {
     appendWithDaySep(threadMessagesEl, data.messages, {inThread: true});
     applyTicks();
     if (stick) scrollBottom(threadMessagesEl);
-    // Открытый тред прочитан: двигаем отметку до его последнего сообщения —
-    // это гасит бейдж тредового @упоминания (#81). Побочно пометятся и
+    // Прочитанный тред двигает отметку до его последнего сообщения — это
+    // гасит бейдж тредового @упоминания (#81). Побочно пометятся и
     // сообщения ленты с меньшим id — читающий тред и так смотрит на чат.
-    const maxId = Math.max(0, ...data.messages.map(m => m.id));
-    if (maxId && chatVisible()){
-      fetch(`api/chats/${current.id}/read`, {
-        method: "POST", headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({last_message_id: maxId}),
-      }).then(() => APP.refreshChats());
-    }
+    threadMaxId = Math.max(0, ...data.messages.map(m => m.id));
+    maybeMarkRead();
   }
+
+  threadMessagesEl.addEventListener("scroll", () => {
+    if (threadMaxId > lastSentRead) maybeMarkRead();
+  });
 
   async function threadSend(){
     const text = threadInputEl.value.trim();
@@ -1491,6 +1518,6 @@ const CHAT = (() => {
   return { open, onChanges, showTyping, updateReads, closeThread, jumpToMsg,
            openThreadAt, avatarColor, initials, refreshModels,
            // Зов снаружи (закрытие доски задач): чат снова виден — прочитан.
-           markVisible: () => { if (lastMsgId && chatVisible()) markRead(); },
+           markVisible: () => maybeMarkRead(),
            currentId: () => current && current.id };
 })();
