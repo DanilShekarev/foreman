@@ -1,0 +1,148 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Изменения — Foreman</title>
+<meta name="description" content="История изменений Foreman: что добавлено и исправлено в каждой версии.">
+<style>
+:root{
+  --bg0:#0e0f11; --bg1:#131416; --bg2:#18191c; --bg3:#1e2024;
+  --border:#26282c; --border-strong:#34373d;
+  --fg:#f0f1f3; --fg-dim:#8f949d; --fg-faint:#62666d;
+  --accent:#5e6ad2; --accent-hover:#6e79e0;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg0);color:var(--fg);
+  font:16px/1.65 "Segoe UI",system-ui,-apple-system,sans-serif;
+  -webkit-font-smoothing:antialiased}
+a{color:var(--accent-hover);text-decoration:none}
+a:hover{text-decoration:underline}
+.wrap{max-width:920px;margin:0 auto;padding:0 24px}
+header{position:sticky;top:0;background:rgba(14,15,17,.92);backdrop-filter:blur(8px);
+  border-bottom:1px solid var(--border);z-index:10}
+header .wrap{display:flex;align-items:center;gap:28px;height:56px}
+.brand{display:flex;align-items:center;gap:9px;font-weight:600;color:var(--fg)}
+.brand:hover{text-decoration:none}
+nav{margin-left:auto;display:flex;gap:22px}
+nav a{color:var(--fg-dim);font-size:14px}
+nav a:hover{color:var(--fg);text-decoration:none}
+nav a.gh{color:var(--fg)}
+main{padding:64px 0}
+h1{font-size:40px;line-height:1.2;letter-spacing:-.02em;margin:0 0 16px}
+.sub{color:var(--fg-dim);margin:0 0 40px;max-width:640px}
+code{background:var(--bg2);border:1px solid var(--border);border-radius:5px;
+  padding:1px 6px;font:13.5px/1.6 Consolas,Menlo,monospace}
+.note{background:var(--bg1);border:1px solid var(--border);border-left:3px solid var(--accent);
+  border-radius:8px;padding:14px 18px;color:var(--fg-dim);font-size:14.5px;margin-top:24px}
+footer{padding:36px 0 48px;color:var(--fg-faint);font-size:14px;border-top:1px solid var(--border)}
+footer .wrap{display:flex;gap:20px;flex-wrap:wrap}
+footer a{color:var(--fg-dim)}
+#log .release{border:1px solid var(--border);border-radius:10px;background:var(--bg1);
+  padding:24px 28px;margin:0 0 18px}
+#log h2{font-size:22px;letter-spacing:-.01em;margin:0}
+#log .date{color:var(--fg-faint);font-size:14px;font-weight:400;margin-left:10px}
+#log h3{font-size:13px;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--fg-dim);margin:20px 0 6px}
+#log ul{margin:8px 0 0;padding-left:20px;color:var(--fg-dim)}
+#log li{margin:8px 0}
+#log p{color:var(--fg-dim);margin:12px 0 0}
+#log b,#log li b{color:var(--fg)}
+@media (max-width:720px){
+  h1{font-size:30px}
+  nav{display:none}
+}
+</style>
+</head>
+<body>
+
+<header><div class="wrap">
+  <a class="brand" href="index.html">
+    <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true"><path fill="#f59d3d" d="M4.6 14v-1.2c0-4.6 3.3-8.3 7.4-8.3s7.4 3.7 7.4 8.3V14z"/><rect x="10.55" y="5.2" width="2.9" height="8.2" rx="1.2" fill="#fbd06e"/><rect x="6.9" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="15.1" y="6.8" width="2" height="6" rx="1" fill="#fbd06e"/><rect x="4.2" y="14" width="15.6" height="1.7" fill="#ee7f2f"/><rect x="1.8" y="15.7" width="20.4" height="2.9" rx="1.45" fill="#f59d3d"/></svg>
+    Foreman
+  </a>
+  <nav>
+    <a href="index.html#features">Возможности</a>
+    <a href="index.html#agent">Агент</a>
+    <a href="index.html#security">Безопасность</a>
+    <a href="index.html#install">Установка</a>
+    <a class="gh" href="https://github.com/DanilShekarev/foreman">GitHub</a>
+  </nav>
+</div></header>
+
+<main><div class="wrap">
+  <h1>Изменения</h1>
+  <p class="sub">История версий Foreman. Раздел «Не выпущено» — то, что уже
+  в <code>main</code>, но ещё не вошло в номерной релиз.</p>
+  <div id="log"><p class="note">Загрузка истории изменений…</p></div>
+</div></main>
+
+<footer><div class="wrap">
+  <span>Foreman — Данила Щекарев</span>
+  <a href="https://github.com/DanilShekarev/foreman/blob/main/CHANGELOG.md">CHANGELOG.md</a>
+  <a href="https://github.com/DanilShekarev/foreman/releases">Релизы на GitHub</a>
+</div></footer>
+
+<script>
+(async () => {
+  const log = document.getElementById("log");
+  const ghUrl = "https://github.com/DanilShekarev/foreman/blob/main/CHANGELOG.md";
+  let text;
+  try {
+    const r = await fetch("https://raw.githubusercontent.com/DanilShekarev/foreman/main/CHANGELOG.md");
+    if (!r.ok) throw new Error(r.status);
+    text = await r.text();
+  } catch {
+    log.innerHTML = `<p class="note">Не удалось загрузить историю изменений.
+      Она всегда доступна в <a href="${ghUrl}">CHANGELOG.md на GitHub</a>.</p>`;
+    return;
+  }
+
+  const esc = s => s.replace(/[&<>]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;"}[c]));
+  const inline = s => esc(s)
+    .replace(/`([^`]+)`/g, "<code>$1</code>")
+    .replace(/\*\*([^*]+)\*\*/g, "<b>$1</b>")
+    .replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // CHANGELOG.md — узкое подмножество markdown: ## версия, ### категория,
+  // «- » пункты с переносом-продолжением, вводные абзацы. Этого и рендерим.
+  let html = "", release = false, list = false, item = null, para = null;
+  const flushItem = () => { if (item !== null){ html += `<li>${inline(item)}</li>`; item = null; } };
+  const flushPara = () => { if (para !== null){ html += `<p>${inline(para)}</p>`; para = null; } };
+  const closeList = () => { flushItem(); if (list){ html += "</ul>"; list = false; } };
+  const closeRelease = () => { closeList(); flushPara(); if (release){ html += "</section>"; release = false; } };
+
+  for (const line of text.split("\n")){
+    let m;
+    if (line.startsWith("# ")) continue;
+    if (m = line.match(/^##\s+\[?([^\]]+?)\]?(?:\s+[—-]+\s+(.*))?\s*$/)){
+      closeRelease();
+      release = true;
+      html += `<section class="release"><h2>${esc(m[1])}` +
+        (m[2] ? `<span class="date">${esc(m[2])}</span>` : "") + "</h2>";
+      continue;
+    }
+    if (m = line.match(/^###\s+(.*)/)){
+      closeList(); flushPara();
+      html += `<h3>${esc(m[1])}</h3>`;
+      continue;
+    }
+    if (m = line.match(/^\s*[-*]\s+(.*)/)){
+      flushItem(); flushPara();
+      if (!list){ html += "<ul>"; list = true; }
+      item = m[1];
+      continue;
+    }
+    if (line.trim() === ""){ closeList(); flushPara(); continue; }
+    if (item !== null){ item += " " + line.trim(); continue; }
+    para = para === null ? line.trim() : para + " " + line.trim();
+  }
+  closeRelease();
+  log.innerHTML = html || `<p class="note">История пуста. Полный файл —
+    <a href="${ghUrl}">CHANGELOG.md на GitHub</a>.</p>`;
+})();
+</script>
+
+</body>
+</html>
