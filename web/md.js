@@ -34,6 +34,18 @@ const MD = (() => {
       (m, target, alias) => keep(`<span class="wikilink" data-wiki="${target.replace(/"/g,'&quot;')}">${alias || target}</span>`));
     s = s.replace(/\[([^\]]+)\]\((https?:[^)]+)\)/g,
       (m, text, href) => keep(`<a href="${href}" target="_blank">${text}</a>`));
+    // Голые URL. К этому моменту URL из markdown-ссылок/картинок/кода уже
+    // спрятаны в плашки; настоящие < > в строке — только теги strong/em/del
+    // (пользовательские экранированы esc-ом), на них URL и обрывается, а
+    // «>» и «;» в списке предшественников пускают URL сразу после тега
+    // (**жирный URL**) и после сущности (&lt;url&gt;). Экранированные
+    // угловые скобки не втягиваются в адрес — lookahead на &lt;/&gt;.
+    s = s.replace(/(^|[\s(«>;])(https?:\/\/(?:(?!&[lg]t;)[^\s<>"\x00])+)/g, (m, pre, url) => {
+      const trail = (url.match(/[.,;:!?…)\]»]+$/) || [""])[0];
+      if (trail) url = url.slice(0, -trail.length);
+      if (!/^https?:\/\/./.test(url)) return m;
+      return pre + keep(`<a href="${url}" target="_blank">${url}</a>`) + trail;
+    });
     s = s.replace(/(^|\s)@([a-zA-Z0-9_.-]+|агент)/g, (m, pre, login) => {
       const meCls = (window.ME && login.toLowerCase() === window.ME.login) ? " me" : "";
       return `${pre}<span class="mention${meCls}">@${login}</span>`;
