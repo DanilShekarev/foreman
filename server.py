@@ -250,10 +250,14 @@ _INVITE_DEAD = ("<html><body style='background:#141518;color:#e8e6e3;font:16px "
 
 
 @app.get("/invite/{token}", response_class=HTMLResponse)
-async def invite_page(token: str):
+async def invite_page(token: str, request: Request):
     conn = store.connect()
     try:
         store.init_db(conn)
+        # Уже зарегистрированные часто переоткрывают инвайт из закладки —
+        # им домой, а не «ссылка недействительна».
+        if store.user_by_token(conn, request.cookies.get(AUTH_COOKIE, "")) is not None:
+            return RedirectResponse(WEB_BASE + "/")
         ok = store.invite_pending(conn, token)
     finally:
         conn.close()
@@ -280,6 +284,8 @@ async def invite_submit(token: str, request: Request):
         return again("Пароли не совпадают")
     conn = store.connect()
     try:
+        if store.user_by_token(conn, request.cookies.get(AUTH_COOKIE, "")) is not None:
+            return RedirectResponse(WEB_BASE + "/", status_code=303)
         # Сначала атомарно гасим ссылку (страховка от двойной регистрации),
         # и возвращаем её, если создать пользователя не вышло (логин занят).
         if not store.claim_invite(conn, token):
