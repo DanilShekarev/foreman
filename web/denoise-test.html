@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Шумодав звонков — подбор порогов</title>
+<style>
+:root{
+  --bg0:#0f1115; --bg1:#171a21; --bg2:#1e222b; --bg3:#262b35;
+  --border:#2b303b; --border-strong:#3a4150;
+  --fg:#e7eaf0; --fg-dim:#9aa3b2; --fg-faint:#697180;
+  --accent:#6ea8fe; --on-accent:#0c1524;
+  --green:#7fc98f; --red:#e2707a; --radius:10px; --radius-sm:7px;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg0);color:var(--fg);
+  font:14px/1.55 "Segoe UI Variable Text","Segoe UI",system-ui,sans-serif;
+  display:flex;justify-content:center;padding:28px 16px 60px}
+main{width:100%;max-width:760px}
+h1{font-size:20px;margin:0 0 4px}
+.sub{color:var(--fg-dim);margin:0 0 22px}
+.group{background:var(--bg1);border:1px solid var(--border);
+  border-radius:var(--radius);padding:14px 16px;margin-bottom:14px}
+.group h2{font-size:15px;margin:0 0 10px}
+.hint{color:var(--fg-faint);font-size:12.5px;margin:10px 0 0}
+.btn{background:var(--bg2);color:var(--fg);border:1px solid var(--border);
+  border-radius:var(--radius-sm);padding:8px 14px;font:inherit;cursor:pointer}
+.btn:hover:not(:disabled){background:var(--bg3);border-color:var(--border-strong)}
+.btn:disabled{opacity:.45;cursor:default}
+.btn.on{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.row{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.opt{display:flex;align-items:center;gap:8px;cursor:pointer}
+.opt input{accent-color:var(--accent);cursor:pointer}
+.meter{display:flex;align-items:center;gap:10px;margin:7px 0}
+.meter span:first-child{width:118px;color:var(--fg-dim);font-size:13px}
+.bar{flex:1;height:8px;background:var(--bg3);border-radius:4px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);
+  transition:width .05s linear}
+.bar.gate i{background:var(--green)}
+.val{width:52px;text-align:right;font-size:12px;color:var(--fg-dim);
+  font-variant-numeric:tabular-nums}
+.par{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px}
+.par span:first-child{width:190px;color:var(--fg-dim)}
+.par input[type="range"]{flex:1;accent-color:var(--accent)}
+code{background:var(--bg2);border-radius:4px;padding:1px 5px;font-size:12.5px}
+.no{color:var(--red)}
+.yes{color:var(--green)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Шумодав звонков — подбор порогов</h1>
+  <p class="sub">Та же цепочка, что в звонке: highpass 90 Гц → RNNoise с гейтом
+    → компрессор. Слушать <b>только в наушниках</b>: иначе микрофон поймает
+    динамики и всё поедет. Подобранные значения переносятся в
+    <code>DEF</code> в <code>web/denoise-worklet.js</code>. В самом звонке
+    шумодав по умолчанию выключен — включается в поповере громкости.</p>
+
+  <div class="group">
+    <div class="row">
+      <button class="btn" id="start">Включить микрофон</button>
+      <button class="btn" id="listen" disabled>Слушать себя</button>
+      <label class="opt"><input type="checkbox" id="on" checked>
+        Шумоподавление</label>
+    </div>
+    <p class="hint" id="state">Микрофон выключен.</p>
+  </div>
+
+  <div class="group">
+    <h2>Что происходит со звуком</h2>
+    <div class="meter"><span>Вероятность речи</span>
+      <div class="bar"><i id="vad-bar"></i></div>
+      <span class="val" id="vad-val">—</span></div>
+    <div class="meter"><span>Гейт открыт на</span>
+      <div class="bar gate"><i id="gain-bar"></i></div>
+      <span class="val" id="gain-val">—</span></div>
+    <p class="hint">Говорите обычным голосом при включённом вентиляторе и
+      попечатайте: речь должна держать оба индикатора вверху, пауза с
+      клавиатурой — внизу. Проглатываются тихие окончания слов — поднимите
+      удержание или опустите порог закрытия.</p>
+  </div>
+
+  <div class="group">
+    <h2>Пороги гейта</h2>
+    <div id="params"></div>
+    <p class="hint">Меняются на лету. Без RNNoise (не загрузился wasm) гейт
+      решает по энергии и отдаёт вероятность 0 или 1 — пороги VAD тогда
+      работают как «есть речь / нет речи».</p>
+  </div>
+</main>
+
+<script>
+const PARAMS = [
+  {k: "openP",     t: "Порог открытия (VAD)",  min: 0,   max: 1,    step: .01, v: .2,  f: 2},
+  {k: "closeP",    t: "Порог закрытия (VAD)",  min: 0,   max: 1,    step: .01, v: .08, f: 2},
+  {k: "floorDb",   t: "Приглушение паузы, дБ", min: -60, max: 0,    step: 1,   v: -20, f: 0},
+  {k: "attackMs",  t: "Атака, мс",             min: 1,   max: 50,   step: 1,   v: 5,   f: 0},
+  {k: "releaseMs", t: "Отпускание, мс",        min: 20,  max: 600,  step: 10,  v: 180, f: 0},
+  {k: "holdMs",    t: "Удержание, мс",         min: 0,   max: 1000, step: 10,  v: 300, f: 0},
+  {k: "riseDb",    t: "Фолбэк: порог над фоном, дБ", min: 3, max: 24, step: 1, v: 8, f: 0},
+];
+
+const $ = id => document.getElementById(id);
+let ctx = null, mic = null, node = null, monitor = null, rnnoise = false;
+
+$("params").innerHTML = PARAMS.map(p =>
+  '<label class="par"><span>' + p.t + '</span>' +
+  '<input type="range" data-k="' + p.k + '" min="' + p.min + '" max="' + p.max +
+  '" step="' + p.step + '" value="' + p.v + '">' +
+  '<span class="val" data-v="' + p.k + '">' + p.v.toFixed(p.f) + '</span></label>'
+).join("");
+
+$("params").oninput = e => {
+  const k = e.target.dataset.k;
+  if (!k) return;
+  const p = PARAMS.find(x => x.k === k);
+  const v = +e.target.value;
+  document.querySelector('[data-v="' + k + '"]').textContent = v.toFixed(p.f);
+  if (node) node.port.postMessage({gate: {[k]: v}});
+};
+
+// Тумблер повторяет поведение звонка: при живом RNNoise браузерный шумодав
+// снимается, при выключенном — возвращается. Значит в A/B слышно ровно то,
+// что услышит собеседник.
+function syncNs(){
+  const track = mic && mic.getAudioTracks()[0];
+  if (!track) return;
+  const own = rnnoise && $("on").checked;
+  track.applyConstraints({echoCancellation: true, autoGainControl: true,
+                          noiseSuppression: !own}).catch(() => {});
+}
+
+$("on").onchange = () => {
+  if (node) node.port.postMessage({on: $("on").checked});
+  syncNs();
+};
+
+$("listen").onclick = () => {
+  if (!monitor) return;
+  const on = monitor.gain.value < .5;
+  monitor.gain.setTargetAtTime(on ? 1 : 0, ctx.currentTime, .02);
+  $("listen").classList.toggle("on", on);
+  $("listen").textContent = on ? "Не слушать себя" : "Слушать себя";
+};
+
+$("start").onclick = async () => {
+  $("start").disabled = true;
+  try {
+    mic = await navigator.mediaDevices.getUserMedia({audio: {
+      echoCancellation: true, noiseSuppression: true, autoGainControl: true}});
+  } catch {
+    $("state").innerHTML = '<span class="no">Нет доступа к микрофону.</span>';
+    $("start").disabled = false;
+    return;
+  }
+  const AC = window.AudioContext || window.webkitAudioContext;
+  try { ctx = new AC({sampleRate: 48000, latencyHint: "interactive"}); }
+  catch { ctx = new AC(); }
+
+  let mod = null;
+  try {
+    if (ctx.sampleRate === 48000){
+      const r = await fetch("vendor/rnnoise.wasm");
+      if (r.ok) mod = await WebAssembly.compile(await r.arrayBuffer());
+    }
+  } catch (e){ console.warn("rnnoise wasm", e); }
+  try { await ctx.audioWorklet.addModule("denoise-worklet.js"); }
+  catch (e){
+    $("state").innerHTML =
+      '<span class="no">Не загрузился denoise-worklet.js.</span>';
+    return;
+  }
+
+  const gate = {};
+  for (const p of PARAMS) gate[p.k] = p.v;
+  node = new AudioWorkletNode(ctx, "mic-denoise", {
+    numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+    channelCount: 1, channelCountMode: "explicit",
+    processorOptions: {wasm: mod, on: $("on").checked, meter: true, gate}});
+  node.port.onmessage = e => {
+    const d = e.data || {};
+    if (d.t === "ready"){
+      rnnoise = d.rnnoise;
+      syncNs();
+      $("state").innerHTML = "Микрофон включён, контекст " + ctx.sampleRate +
+        " Гц. RNNoise: " + (d.rnnoise ? '<b class="yes">работает</b>.'
+          : '<b class="no">нет</b>' + (d.err ? " (" + d.err + ")" : "") +
+            ", остался гейт по энергии.");
+    } else if (d.t === "level"){
+      $("vad-bar").style.width = Math.round(d.vad * 100) + "%";
+      $("vad-val").textContent = d.vad.toFixed(2);
+      $("gain-bar").style.width = Math.round(d.gain * 100) + "%";
+      $("gain-val").textContent = Math.round(d.gain * 100) + "%";
+    }
+  };
+
+  const src = ctx.createMediaStreamSource(mic);
+  const hp = ctx.createBiquadFilter();
+  hp.type = "highpass"; hp.frequency.value = 90; hp.Q.value = .7;
+  const comp = ctx.createDynamicsCompressor();
+  comp.threshold.value = -28; comp.knee.value = 12; comp.ratio.value = 4;
+  comp.attack.value = .003; comp.release.value = .25;
+  const makeup = ctx.createGain(); makeup.gain.value = 1.2;
+  monitor = ctx.createGain(); monitor.gain.value = 0;
+  src.connect(hp).connect(node).connect(comp).connect(makeup)
+     .connect(monitor).connect(ctx.destination);
+
+  $("listen").disabled = false;
+};
+</script>
+</body>
+</html>

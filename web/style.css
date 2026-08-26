@@ -1031,6 +1031,10 @@ body.kb-dragging{cursor:grabbing;user-select:none}
   border-radius:var(--radius);box-shadow:var(--shadow-3);padding:10px 12px;
   animation:ctx-in .1s ease}
 .cvp-row{display:flex;align-items:center;gap:10px;padding:5px 0;font-size:13px}
+.cvp-toggle{display:flex;align-items:center;gap:10px;font-size:13px;
+  padding:2px 0 8px;margin-bottom:4px;border-bottom:1px solid var(--border);
+  cursor:pointer}
+.cvp-toggle input{margin:0 0 0 auto;accent-color:var(--accent);cursor:pointer}
 .cvp-name{flex:none;width:132px;overflow:hidden;text-overflow:ellipsis;
   white-space:nowrap;display:inline-flex;align-items:center;gap:6px;
   color:var(--fg)}

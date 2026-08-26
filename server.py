@@ -2101,14 +2101,18 @@ async def index_page(request: Request):
                         headers={"Cache-Control": "no-cache"})
 
 
-# В реестре Windows .webmanifest не значится — StaticFiles отдал бы octet-stream.
+# В реестре Windows .webmanifest и .wasm не значатся — StaticFiles отдал бы
+# octet-stream.
 mimetypes.add_type("application/manifest+json", ".webmanifest")
+mimetypes.add_type("application/wasm", ".wasm")
 
 
 class ImmutableStatic(StaticFiles):
-    # sw.js и манифест браузер запрашивает по постоянному URL без ?v= —
-    # immutable заморозил бы их обновление на год.
-    _NO_CACHE = (".html", "sw.js", ".webmanifest")
+    # sw.js, манифест и ассеты шумодава браузер запрашивает по постоянному
+    # URL без ?v= (штамп мтайма ставится только на подключённое из
+    # index.html) — immutable заморозил бы их обновление на год.
+    _NO_CACHE = (".html", "sw.js", ".webmanifest", "denoise-worklet.js",
+                 ".wasm")
 
     def file_response(self, *args, **kwargs):
         resp = super().file_response(*args, **kwargs)

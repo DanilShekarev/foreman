@@ -1,6 +1,7 @@
 // Созвоны (#86): WebRTC mesh, сигналинг — WS /api/call/ws?chat=, комната
-// привязана к чату. Исходящий звук: шумодав/AEC/AGC браузера + highpass +
-// компрессор (WebAudio). Каждый участник пишет СВОЙ микрофон MediaRecorder-ом
+// привязана к чату. Исходящий звук: AEC/AGC браузера + highpass + компрессор
+// (WebAudio) и по желанию RNNoise с гейтом (#102, denoise-worklet.js) — он
+// выключен по умолчанию. Каждый участник пишет СВОЙ микрофон MediaRecorder-ом
 // и шлёт чанки на сервер — пер-спикерные дорожки для расшифровки.
 const CALL = (() => {
   let active = null;    // текущий звонок (см. join)
@@ -36,6 +37,106 @@ const CALL = (() => {
       const p = active.pcs.get(+key.slice(1));
       if (p && p.audioEl) p.audioEl.volume = v;
     }
+  }
+
+  // Шумоподавление (#102): RNNoise + гейт в AudioWorklet, тумблер в том же
+  // поповере. Помнится между звонками; по умолчанию ВЫКЛЮЧЕНО — обработка
+  // добавляет 40 мс задержки и грузит wasm, так что включает её тот, кому
+  // она нужна.
+  function denoiseOn(){
+    return localStorage.getItem("gd_call_denoise") === "1";
+  }
+
+  async function setDenoise(on){
+    localStorage.setItem("gd_call_denoise", on ? "1" : "0");
+    const a = active;
+    if (!a) return;
+    // Ленивая загрузка: пока шумодав не включили, wasm не качается вовсе.
+    if (on && !a.denoise){
+      if (!a.denoiseWait) a.denoiseWait = makeDenoise(a.ctx);
+      a.denoise = await a.denoiseWait;
+      a.denoiseWait = null;
+      if (active !== a) return;   // звонок закончился, пока грузился wasm
+      if (!a.denoise){
+        // Молча оставить галочку включённой нельзя: человек будет думать,
+        // что шумодав работает.
+        localStorage.setItem("gd_call_denoise", "0");
+        const box = document.getElementById("cvp-denoise");
+        if (box) box.checked = false;
+        APP.alert("Не удалось включить шумоподавление: браузер не поддерживает" +
+                  " обработку звука в AudioWorklet.", "Звонок");
+        return;
+      }
+    }
+    if (a.denoise) a.denoise.port.postMessage({on});
+    routeDenoise();
+    syncMicNs();
+  }
+
+  // Нода стоит в тракте, только пока шумодав включён: иначе она добавляла бы
+  // свои 40 мс задержки и молола тишину впустую.
+  function routeDenoise(){
+    const a = active;
+    if (!a) return;
+    try { a.hpNode.disconnect(); } catch {}
+    if (a.denoise){
+      try { a.denoise.disconnect(); } catch {}
+    }
+    if (a.denoise && denoiseOn()){
+      a.hpNode.connect(a.denoise);
+      a.denoise.connect(a.compNode);
+    } else {
+      a.hpNode.connect(a.compNode);
+    }
+  }
+
+  // Пока работает свой RNNoise, браузерный шумодав только мешает: двойная
+  // обработка даёт артефакты. AEC и AGC остаются за браузером.
+  function syncMicNs(){
+    if (!active || !active.mic) return;
+    const track = active.mic.getAudioTracks()[0];
+    if (!track || !track.applyConstraints) return;
+    const own = !!(active.denoise && active.denoise.rnnoise) && denoiseOn();
+    track.applyConstraints({echoCancellation: true, autoGainControl: true,
+                            noiseSuppression: !own}).catch(() => {});
+  }
+
+  // Всё, что может не получиться (нет wasm, браузер без AudioWorklet, частота
+  // не 48 кГц, DataCloneError на WebAssembly.Module), кончается работой без
+  // ноды или без RNNoise: звонок важнее шумодава.
+  async function makeDenoise(ctx){
+    if (!ctx.audioWorklet) return null;
+    let mod = null;
+    try {
+      if (ctx.sampleRate === 48000){
+        const r = await fetch("vendor/rnnoise.wasm");
+        if (r.ok) mod = await WebAssembly.compile(await r.arrayBuffer());
+      }
+    } catch (e){ console.warn("rnnoise wasm", e); }
+    try { await ctx.audioWorklet.addModule("denoise-worklet.js"); }
+    catch (e){ console.warn("denoise worklet", e); return null; }
+    const opts = {numberOfInputs: 1, numberOfOutputs: 1, outputChannelCount: [1],
+                  channelCount: 1, channelCountMode: "explicit",
+                  processorOptions: {wasm: mod, on: denoiseOn()}};
+    let node;
+    try { node = new AudioWorkletNode(ctx, "mic-denoise", opts); }
+    catch (e){
+      // Safari не умеет клонировать WebAssembly.Module в processorOptions —
+      // пробуем ещё раз без него, гейт работает и без RNNoise.
+      console.warn("denoise node", e);
+      if (!mod) return null;
+      opts.processorOptions.wasm = null;
+      try { node = new AudioWorkletNode(ctx, "mic-denoise", opts); }
+      catch { return null; }
+    }
+    node.port.onmessage = e => {
+      const d = e.data || {};
+      if (d.t !== "ready") return;
+      node.rnnoise = d.rnnoise;
+      if (d.err) console.warn("rnnoise:", d.err);
+      syncMicNs();
+    };
+    return node;
   }
 
   // Выбранный микрофон помнится между звонками; ideal — если устройство
@@ -97,9 +198,15 @@ const CALL = (() => {
       APP.alert("Нет доступа к микрофону: разрешите его в браузере.", "Звонок");
       return;
     }
-    // Цепочка обработки: шумодав уже отработал при захвате, дальше — срез
-    // низкочастотного гула и компрессор, чтобы тихих было слышно.
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    // Цепочка обработки: срез низкочастотного гула, дальше — включённый
+    // шумодав (строго ДО компрессора: иначе компрессор накачивает шум,
+    // который гейт следом приглушает, и это слышно как «дыхание») и
+    // компрессор, чтобы тихих было слышно.
+    const AC = window.AudioContext || window.webkitAudioContext;
+    let ctx;
+    // RNNoise живёт только на 48 кГц; не дал браузер — работаем без него.
+    try { ctx = new AC({sampleRate: 48000, latencyHint: "interactive"}); }
+    catch { ctx = new AC(); }
     const src = ctx.createMediaStreamSource(mic);
     const hp = ctx.createBiquadFilter();
     hp.type = "highpass"; hp.frequency.value = 90; hp.Q.value = 0.7;
@@ -109,18 +216,25 @@ const CALL = (() => {
     const makeup = ctx.createGain(); makeup.gain.value = 1.2;
     const micGain = ctx.createGain(); micGain.gain.value = getVol("mic");
     const dest = ctx.createMediaStreamDestination();
-    src.connect(hp).connect(comp).connect(makeup).connect(micGain).connect(dest);
+
+    // Включённый шумодав грузится параллельно с ICE — оба нужны до первого
+    // пира; выключенный не грузится совсем.
+    const [ice, denoise] = await Promise.all([
+      fetch("api/call/ice").then(r => r.json()).catch(() => null),
+      denoiseOn() ? makeDenoise(ctx) : null,
+    ]);
+    const iceServers = (ice && ice.iceServers) || [];
+
+    src.connect(hp);
+    comp.connect(makeup).connect(micGain).connect(dest);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 512;
     micGain.connect(analyser);
 
-    let iceServers = [];
-    try { iceServers = (await (await fetch("api/call/ice")).json()).iceServers || []; }
-    catch {}
-
     active = {
       chat, callId: 0, session: 1, ws: null, closing: false,
-      ctx, mic, srcNode: src, hpNode: hp, micGain, outStream: dest.stream,
+      ctx, mic, srcNode: src, hpNode: hp, compNode: comp, micGain, denoise,
+      denoiseWait: null, outStream: dest.stream,
       outTrack: dest.stream.getAudioTracks()[0],
       iceServers, pcs: new Map(), roster: new Map(),
       muted: false, sharing: false, screenStream: null,
@@ -129,6 +243,8 @@ const CALL = (() => {
       startedAt: Date.now(), timers: [],
     };
     dismissIncoming();
+    routeDenoise();
+    syncMicNs();  // ready из worklet мог прийти раньше, чем появился active
 
     const ws = new WebSocket(wsUrl(chat.id));
     active.ws = ws;
@@ -356,6 +472,7 @@ const CALL = (() => {
     active.mic = mic;
     active.srcNode = active.ctx.createMediaStreamSource(mic);
     active.srcNode.connect(active.hpNode);
+    syncMicNs();
   }
 
   async function pickMic(e){
@@ -532,7 +649,11 @@ const CALL = (() => {
         <input type="range" min="0" max="${max}" value="${v}" data-key="${key}">
         <b class="cvp-val">${v}%</b></div>`;
     };
-    let html = row(`${ICON("mic", "sm")} Мой микрофон`, "mic", 200);
+    let html = `<label class="cvp-toggle">
+      <span class="cvp-name">${ICON("spark", "sm")} Шумоподавление</span>
+      <input type="checkbox" id="cvp-denoise"${denoiseOn() ? " checked" : ""}>
+      </label>`;
+    html += row(`${ICON("mic", "sm")} Мой микрофон`, "mic", 200);
     for (const p of active.roster.values())
       html += row(MD.esc(p.name), "u" + p.id, 100);
     if (active.sharerId && active.sharerId !== window.ME.id)
@@ -552,6 +673,8 @@ const CALL = (() => {
       applyVol(inp.dataset.key, v);
       inp.parentElement.querySelector(".cvp-val").textContent = inp.value + "%";
     };
+    pop.querySelector("#cvp-denoise").onchange =
+      ev => { setDenoise(ev.target.checked).catch(() => {}); };
     document.addEventListener("mousedown", onVolPopOutside);
   }
 
