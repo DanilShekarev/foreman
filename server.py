@@ -1884,37 +1884,48 @@ async def api_vault_put(request: Request):
 
 
 @app.post("/api/vault/upload")
-async def api_vault_upload(request: Request, file: UploadFile, folder: str = "shared"):
+async def api_vault_upload(request: Request, file: UploadFile, folder: str = "shared",
+                           overwrite: int = 0, copy: int = 0):
     user = me(request)
     data = await file.read()
     name = file.filename or "doc"
     ext = Path(name).suffix.lower()
     slug = docx_io.slugify(name)
     try:
+        if ext not in (".docx", ".md", ".markdown", ".txt"):
+            return JSONResponse({"error": "поддерживаются .docx и .md"}, status_code=400)
+        rel_dir = folder.strip("/") or "shared"
+        target = vaultlib.safe_path(f"{rel_dir}/{slug}.md")
+        if target.exists():
+            if copy:
+                n = 2
+                while vaultlib.safe_path(f"{rel_dir}/{slug}-{n}.md").exists():
+                    n += 1
+                slug = f"{slug}-{n}"
+                target = vaultlib.safe_path(f"{rel_dir}/{slug}.md")
+            elif not overwrite:
+                return JSONResponse(
+                    {"error": f"документ «{slug}.md» уже есть в этой папке",
+                     "exists": True,
+                     "path": target.relative_to(VAULT).as_posix()},
+                    status_code=409)
+        if not vaultlib.can_write(user, target):
+            return JSONResponse({"error": "сюда вам писать нельзя"}, status_code=403)
         if ext == ".docx":
             if not docx_io.AVAILABLE:
                 return JSONResponse(
                     {"error": "docx-импорт недоступен: pip install mammoth markdownify"},
                     status_code=501)
-            rel_dir = folder.strip("/") or "shared"
-            target = vaultlib.safe_path(f"{rel_dir}/{slug}.md")
-            if not vaultlib.can_write(user, target):
-                return JSONResponse({"error": "сюда вам писать нельзя"}, status_code=403)
             assets = vaultlib.safe_path(f"shared/_assets/{slug}")
             depth = len(Path(rel_dir).parts)
             assets_rel = "../" * depth + f"shared/_assets/{slug}"
             md = docx_io.docx_to_markdown(data, assets, assets_rel)
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(md, encoding="utf-8", newline="\n")
-        elif ext in (".md", ".markdown", ".txt"):
-            target = vaultlib.safe_path(f"{folder.strip('/') or 'shared'}/{slug}.md")
-            if not vaultlib.can_write(user, target):
-                return JSONResponse({"error": "сюда вам писать нельзя"}, status_code=403)
+        else:
             target.parent.mkdir(parents=True, exist_ok=True)
             target.write_text(data.decode("utf-8", "replace"), encoding="utf-8",
                               newline="\n")
-        else:
-            return JSONResponse({"error": "поддерживаются .docx и .md"}, status_code=400)
     except vaultlib.VaultError as exc:
         return JSONResponse({"error": str(exc)}, status_code=403)
     rel = target.relative_to(VAULT).as_posix()

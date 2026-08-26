@@ -366,17 +366,63 @@ const VAULT = (() => {
     });
   }
 
-  uploadInput.onchange = async () => {
-    const file = uploadInput.files[0];
-    if (!file) return;
+  // «Заменить / Загрузить как копию» при конфликте имён. На общих узлах
+  // #modal-back/#modal; обработчик клика по подложке из app.js временно
+  // подменяется, чтобы закрытие резолвило промис.
+  function askUploadConflict(fileName){
+    return new Promise(resolve => {
+      const back = document.getElementById("modal-back");
+      const modal = document.getElementById("modal");
+      modal.innerHTML = `
+        <h3>Документ уже существует</h3>
+        <p>«${MD.esc(fileName)}» уже есть в волте. Заменить его?
+           История правок сохранится.</p>
+        <div class="row"><button id="up-cancel">Отмена</button>
+        <button id="up-copy">Загрузить как копию</button>
+        <button id="up-over">Заменить</button></div>`;
+      back.style.display = "";
+      const prevClick = back.onclick;
+      const done = v => {
+        back.style.display = "none";
+        back.onclick = prevClick;
+        document.removeEventListener("keydown", onKey, true);
+        resolve(v);
+      };
+      const onKey = e => {
+        if (e.key !== "Escape") return;
+        e.stopPropagation();
+        e.preventDefault();
+        done(null);
+      };
+      document.addEventListener("keydown", onKey, true);
+      back.onclick = e => { if (e.target === back) done(null); };
+      modal.querySelector("#up-cancel").onclick = () => done(null);
+      modal.querySelector("#up-copy").onclick = () => done("&copy=1");
+      modal.querySelector("#up-over").onclick = () => done("&overwrite=1");
+    });
+  }
+
+  async function uploadVaultFile(file, extra = ""){
     const fd = new FormData();
     fd.append("file", file);
-    const r = await fetch("api/vault/upload?folder=shared", {method: "POST", body: fd});
+    const r = await fetch("api/vault/upload?folder=shared" + extra,
+                          {method: "POST", body: fd});
     const data = await r.json();
-    uploadInput.value = "";
+    if (r.status === 409 && data.exists){
+      const choice = await askUploadConflict(file.name);
+      if (choice) await uploadVaultFile(file, choice);
+      return;
+    }
     if (data.error){ APP.alert(data.error); return; }
     await refreshTree();
     openDoc(data.path);
+  }
+
+  uploadInput.onchange = async () => {
+    const file = uploadInput.files[0];
+    if (!file) return;
+    uploadInput.value = "";
+    await uploadVaultFile(file);
   };
 
   // ------------------------------------------------------------- история
