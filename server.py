@@ -2068,6 +2068,14 @@ async def api_search(request: Request, q: str = ""):
     return {"docs": docs, "messages": msgs}
 
 
+@app.get("/api/changelog")
+async def api_changelog():
+    try:
+        return {"text": (HERE / "CHANGELOG.md").read_text("utf-8")}
+    except OSError:
+        return JSONResponse({"error": "CHANGELOG.md не найден"}, status_code=404)
+
+
 # --------------------------------------------------------------- статика (последней!)
 
 # Кэш-схема для работы через интернет: index.html отдаётся роутом ниже с
