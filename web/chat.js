@@ -1125,10 +1125,36 @@ const CHAT = (() => {
 
   function renderAttachChips(){ renderChips(attachChips, attachments); }
 
+  // Сжатие как в Telegram: длинная сторона до 2560, перекодирование в JPEG.
+  // PNG/WebP конвертируются (прозрачность ложится на белый фон); GIF (анимация)
+  // и SVG не трогаем. Если выигрыша нет и размер не менялся — шлём оригинал.
+  const COMPRESSIBLE = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+  async function compressImage(f){
+    let bmp;
+    try { bmp = await createImageBitmap(f); } catch { return f; }
+    const scale = Math.min(1, 2560 / Math.max(bmp.width, bmp.height));
+    const w = Math.max(1, Math.round(bmp.width * scale));
+    const h = Math.max(1, Math.round(bmp.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(bmp, 0, 0, w, h);
+    bmp.close();
+    const blob = await new Promise(res => canvas.toBlob(res, "image/jpeg", 0.87));
+    if (!blob || (scale === 1 && blob.size >= f.size)) return f;
+    return new File([blob], f.name.replace(/\.[^.]+$/, "") + ".jpg",
+                    {type: "image/jpeg"});
+  }
+
   // Общая загрузка файлов (кнопка, drag&drop, Ctrl+V) в один из композеров.
-  async function uploadFilesTo(files, list, chipsEl){
+  async function uploadFilesTo(files, list, chipsEl, compress){
     if (!current){ APP.alert("сначала выберите чат"); return; }
-    for (const f of files){
+    for (let f of files){
+      if (compress && COMPRESSIBLE.has(f.type)) f = await compressImage(f);
       const fd = new FormData();
       fd.append("file", f);
       const r = await fetch(`api/chats/${current.id}/upload`,
@@ -1141,21 +1167,79 @@ const CHAT = (() => {
     }
   }
 
+  // Модалка «со сжатием / без» (как в Telegram) для картинок, попавших через
+  // скрепку или Ctrl+V. Резолвится true/false; null — отмена.
+  function askCompress(files){
+    const imgs = files.filter(f => COMPRESSIBLE.has(f.type));
+    const rest = files.length - imgs.length;
+    return new Promise(resolve => {
+      openChatModal(`<h3>${ICON("image")} Отправка изображений</h3>
+        <div class="img-preview"></div>
+        ${rest ? `<div class="hint">и ещё файлов без сжатия: ${rest}</div>` : ""}
+        <label class="check"><input type="checkbox" id="m-raw">
+          Отправить без сжатия</label>
+        <div class="row"><button id="m-cancel">Отмена</button>
+        <button id="m-ok">Прикрепить</button></div>`);
+      const grid = document.querySelector("#modal .img-preview");
+      const urls = [];
+      for (const f of imgs){
+        const img = document.createElement("img");
+        urls.push(img.src = URL.createObjectURL(f));
+        grid.appendChild(img);
+      }
+      const back = document.getElementById("modal-back");
+      const done = v => {
+        urls.forEach(u => URL.revokeObjectURL(u));
+        back.removeEventListener("click", onBack);
+        document.removeEventListener("keydown", onKey, true);
+        closeChatModal();
+        resolve(v);
+      };
+      const onBack = e => { if (e.target === back) done(null); };
+      const onKey = e => {
+        if (e.key !== "Escape" && e.key !== "Enter") return;
+        e.stopPropagation();
+        e.preventDefault();
+        done(e.key === "Enter" ? !document.getElementById("m-raw").checked : null);
+      };
+      back.addEventListener("click", onBack);
+      document.addEventListener("keydown", onKey, true);
+      document.getElementById("m-cancel").onclick = () => done(null);
+      document.getElementById("m-ok").onclick =
+        () => done(!document.getElementById("m-raw").checked);
+    });
+  }
+
+  // Скрепка и Ctrl+V: если среди файлов есть картинки — спросить про сжатие.
+  async function addFiles(files, list, chipsEl){
+    files = [...files];
+    if (!files.length) return;
+    if (!current){ APP.alert("сначала выберите чат"); return; }
+    let compress = false;
+    if (files.some(f => COMPRESSIBLE.has(f.type))){
+      compress = await askCompress(files);
+      if (compress === null) return;
+    }
+    await uploadFilesTo(files, list, chipsEl, compress);
+  }
+
   const fileInput = document.getElementById("file-input");
   document.getElementById("btn-attach").onclick = () => {
     if (!current){ APP.alert("сначала выберите чат"); return; }
     fileInput.click();
   };
   fileInput.onchange = async () => {
-    await uploadFilesTo(fileInput.files, attachments, attachChips);
+    const files = [...fileInput.files];
     fileInput.value = "";
+    await addFiles(files, attachments, attachChips);
   };
 
   const threadFileInput = document.getElementById("thread-file-input");
   document.getElementById("btn-thread-attach").onclick = () => threadFileInput.click();
   threadFileInput.onchange = async () => {
-    await uploadFilesTo(threadFileInput.files, threadAttachments, threadAttachChips);
+    const files = [...threadFileInput.files];
     threadFileInput.value = "";
+    await addFiles(files, threadAttachments, threadAttachChips);
   };
 
   // Ctrl+V со скриншотом в буфере и перетаскивание файла в окно чата/треда.
@@ -1164,7 +1248,7 @@ const CHAT = (() => {
       const files = [...(e.clipboardData?.files || [])];
       if (!files.length) return;
       e.preventDefault();
-      uploadFilesTo(files, list, chipsEl);
+      addFiles(files, list, chipsEl);
     };
   }
   inputEl.addEventListener("paste", pasteHandler(attachments, attachChips));
@@ -1174,17 +1258,43 @@ const CHAT = (() => {
   // Принимает и файлы с компьютера, и перетащенный из волта документ
   // (кастомный тип application/x-vault-path — см. vault.js renderNodes):
   // тогда вместо загрузки добавляется вложение-док, как раньше делала
-  // кнопка «прикрепить документ из волта».
+  // кнопка «прикрепить документ из волта». Если среди файлов есть картинки —
+  // поверх панели раскрываются две зоны сброса: со сжатием и без (как в ТГ).
   function dropzone(el, getTarget){
-    const types = e => [...e.dataTransfer.types];
-    el.addEventListener("dragover", e => {
-      if (!types(e).includes("Files") && !types(e).includes("application/x-vault-path")) return;
-      e.preventDefault();
-      el.classList.add("drag-over");
-    });
-    el.addEventListener("dragleave", () => el.classList.remove("drag-over"));
-    el.addEventListener("drop", e => {
+    const zones = document.createElement("div");
+    zones.className = "drop-zones";
+    zones.innerHTML = `
+      <div class="drop-zone" data-raw="">${ICON("image")}<span>Отправить со сжатием</span></div>
+      <div class="drop-zone" data-raw="1">${ICON("file")}<span>Отправить без сжатия</span></div>`;
+    el.appendChild(zones);
+    const hide = () => {
+      zones.classList.remove("show");
       el.classList.remove("drag-over");
+      zones.querySelectorAll(".drop-zone").forEach(z => z.classList.remove("hot"));
+    };
+    // До drop файлы недоступны, но их MIME-типы видны в items уже на dragover.
+    const hasImage = e => [...(e.dataTransfer.items || [])]
+      .some(i => i.kind === "file" && COMPRESSIBLE.has(i.type));
+    el.addEventListener("dragover", e => {
+      const types = [...e.dataTransfer.types];
+      if (!types.includes("Files") && !types.includes("application/x-vault-path")) return;
+      e.preventDefault();
+      if (types.includes("Files") && hasImage(e)){
+        zones.classList.add("show");
+        const z = e.target.closest?.(".drop-zone");
+        zones.querySelectorAll(".drop-zone").forEach(el2 =>
+          el2.classList.toggle("hot", el2 === z));
+      } else {
+        el.classList.add("drag-over");
+      }
+    });
+    el.addEventListener("dragleave", e => {
+      if (e.relatedTarget && el.contains(e.relatedTarget)) return;
+      hide();
+    });
+    el.addEventListener("drop", e => {
+      const raw = e.target.closest?.(".drop-zone")?.dataset.raw;
+      hide();
       const vaultPath = e.dataTransfer.getData("application/x-vault-path");
       const [list, chips] = getTarget();
       if (vaultPath){
@@ -1196,7 +1306,7 @@ const CHAT = (() => {
       }
       if (!e.dataTransfer.files.length) return;
       e.preventDefault();
-      uploadFilesTo(e.dataTransfer.files, list, chips);
+      uploadFilesTo([...e.dataTransfer.files], list, chips, raw === "");
     });
   }
   dropzone(document.getElementById("chat-pane"),

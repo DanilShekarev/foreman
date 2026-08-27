@@ -421,6 +421,22 @@ option{background:var(--bg1);color:var(--fg)}
 /* ---- drag&drop */
 #chat-pane.drag-over,#thread-pane.drag-over{outline:2px dashed var(--accent);
   outline-offset:-6px}
+#chat-pane,#thread-pane{position:relative}
+.drop-zones{position:absolute;inset:0;z-index:6;display:none;
+  flex-direction:column;gap:10px;padding:14px;
+  background:color-mix(in srgb,var(--bg0) 72%,transparent)}
+.drop-zones.show{display:flex}
+.drop-zone{flex:1;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:8px;min-height:0;
+  border:2px dashed var(--border-strong);border-radius:var(--radius);
+  background:var(--bg1);color:var(--fg-dim);font-size:13px}
+.drop-zone.hot{border-color:var(--accent);background:var(--bg2);
+  color:var(--fg)}
+.drop-zone .icon{width:22px;height:22px}
+#modal .img-preview{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px;
+  max-height:40vh;overflow-y:auto}
+#modal .img-preview img{max-width:130px;max-height:130px;
+  border-radius:var(--radius-sm);border:1px solid var(--border)}
 
 /* ============================================================ волт */
 #vault-pane{grid-column:3;grid-row:1;background:var(--bg1);
