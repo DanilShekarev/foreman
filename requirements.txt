@@ -3,7 +3,7 @@
 # чем кто-то это заметит.
 fastapi>=0.115
 uvicorn[standard]>=0.30
-claude-agent-sdk>=0.2
+claude-agent-sdk>=0.2.168
 python-multipart>=0.0.9
 mammoth>=1.8
 markdownify>=1.1
