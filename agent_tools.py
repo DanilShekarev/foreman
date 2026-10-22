@@ -31,6 +31,10 @@ READ_MAX_LINES = 1200
 READ_MAX_CHARS = 120_000
 GREP_MAX_HITS = 200
 GLOB_MAX_FILES = 300
+# CLI кладёт MCP-результат длиннее ~25 тыс. токенов во временный файл, а он
+# вне read-корней агента — длинную расшифровку тот не мог прочесть вовсе.
+# Кириллица — около двух символов на токен, отсюда запас.
+THREAD_PAGE_CHARS = 30_000
 
 
 def _ru_plural(n: int, one: str, few: str, many: str) -> str:
@@ -467,12 +471,15 @@ def thread_tools(chat_id: int) -> list[SdkMcpTool]:
             lines.append(f"[m{m['id']}] {m['author_name']} ({hhmm}): {text}")
         return _ok("\n".join(lines))
 
-    @tool("read_thread", "Прочитать тред целиком: корень и все ответы, "
-          "полными текстами. Годится для длинных тредов и расшифровок "
-          "созвонов (тред под системным «Звонок завершён»). "
-          "root_message_id — id корневого сообщения ленты (в ленте и "
-          "list_recent это m123; можно передать id любого ответа — корень "
-          "найдётся сам).", {"root_message_id": str})
+    @tool("read_thread", "Прочитать тред: корень и ответы полными текстами, "
+          "постранично. Годится для длинных тредов и расшифровок созвонов "
+          "(тред под системным «Звонок завершён»). root_message_id — id "
+          "корневого сообщения ленты (в ленте и list_recent это m123; можно "
+          "передать id любого ответа — корень найдётся сам). offset — "
+          "сколько сообщений треда пропустить (корень — первое), по "
+          "умолчанию 0. Длинный тред приходит частями: если в конце "
+          "страницы указан следующий offset, дочитай тред до конца, прежде "
+          "чем делать выводы.", {"root_message_id": str, "offset": str})
     async def read_thread(args):
         raw_root = (args.get("root_message_id") or "").strip().lstrip("#m")
         if not raw_root.isdigit():
@@ -485,24 +492,46 @@ def thread_tools(chat_id: int) -> list[SdkMcpTool]:
                 return _err("это сообщение из другого чата")
             if root.get("thread_root_id"):
                 root = store.get_message(conn, root["thread_root_id"])
-            msgs = store.list_messages(conn, chat_id, limit=2000,
+            # list_messages берёт ПОСЛЕДНИЕ limit — у многочасового созвона
+            # 2000 реплик срезали бы начало.
+            msgs = store.list_messages(conn, chat_id, limit=50_000,
                                        thread_root_id=root["id"])
         except store.StoreError as err:
             return _err(str(err))
         finally:
             conn.close()
-        lines = [f"[m{root['id']}] (корень) {root['author_name']}:"
-                 f" {root.get('text') or '(без текста)'}"]
+        entries = [f"[m{root['id']}] (корень) {root['author_name']}:"
+                   f" {root.get('text') or '(без текста)'}"]
         for m in msgs:
             text = ("(удалено)" if m.get("deleted_at")
                     else (m.get("text") or "(без текста)"))
-            lines.append(f"[m{m['id']}] {m['author_name']}: {text}")
-        out = "\n".join(lines)
-        # Страховка от простыней: транспорт SDK — 1 МБ на строку JSON.
-        if len(out) > 400_000:
-            out = out[:400_000] + "\n[…тред обрезан, показано начало]"
-        if not msgs:
+            entries.append(f"[m{m['id']}] {m['author_name']}: {text}")
+        total = len(entries)
+        offset = max(0, _int(args.get("offset"), 0))
+        if offset >= total:
+            return _err(f"offset за концом треда: в нём {total} "
+                        + _ru_plural(total, "сообщение", "сообщения",
+                                     "сообщений")
+                        + " вместе с корнем")
+        page, used = [], 0
+        for entry in entries[offset:]:
+            if len(entry) > THREAD_PAGE_CHARS:
+                entry = (entry[:THREAD_PAGE_CHARS]
+                         + " […сообщение обрезано: длиннее страницы]")
+            # Хотя бы одно сообщение на страницу, иначе offset не сдвинется.
+            if page and used + len(entry) > THREAD_PAGE_CHARS:
+                break
+            page.append(entry)
+            used += len(entry) + 1
+        shown = offset + len(page)
+        out = "\n".join(page)
+        if total == 1:
             out += "\n(ответов в треде нет)"
+        elif shown < total:
+            out += (f"\n[…показаны сообщения {offset + 1}–{shown} из {total};"
+                    f" дальше — read_thread с offset={shown}]")
+        elif offset:
+            out += f"\n[конец треда: сообщения {offset + 1}–{total} из {total}]"
         return _ok(out)
 
     @tool("move_to_thread", "Перенести сообщения ленты этого чата в тред "
